@@ -5,6 +5,7 @@ import(
   "fmt"
   "os"
   "../ptrace"
+  "runtime"
   "syscall"
 )
 
@@ -13,7 +14,7 @@ func Test() {
 }
 
 var(
-  cldinfo *os.Process
+  chld *os.Process
 )
 
 func Blah() {
@@ -34,11 +35,14 @@ func StartUnderOurPurview(program string, arguments []string) (*os.Process, erro
   };
   files := []*os.File{os.Stdin, os.Stdout, os.Stderr};
   attr := os.ProcAttr{ Dir: ".", Env: nil, Files: files, Sys: &sattr };
+
+  runtime.LockOSThread(); // needed to make Ptrace'd processes work.
   var err error;
-  cldinfo, err = os.StartProcess(program, arguments, &attr);
+  chld, err = os.StartProcess(program, arguments, &attr);
   if err != nil { return nil, err; }
 
-  return cldinfo, nil
+  err = syscall.PtraceSetOptions(chld.Pid, syscall.PTRACE_O_TRACEEXEC)
+  return chld, err
 /*
   chld := Fork();
   if(chld == 0) {

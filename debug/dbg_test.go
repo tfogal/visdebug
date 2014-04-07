@@ -1,6 +1,4 @@
 package debug
-import "os"
-import "os/signal"
 import "syscall"
 import "testing"
 
@@ -8,27 +6,24 @@ func TestStartControlledBasic(t *testing.T) {
   argv := []string{"/bin/true"}
   proc, err := StartUnderOurPurview(argv[0], argv)
   if err != nil {
-    t.Fatalf("could not create process")
+    t.Fatalf("could not create process: %v", err)
+    t.FailNow();
   }
-  _, err = proc.Wait()
+  err = syscall.PtraceCont(proc.Pid, 0)
   if err != nil {
-    t.Fatalf("waiting failed")
+    t.Fatalf("continuing failed: %v\n", err)
+    t.FailNow(); // otherwise we'd deadlock.
   }
-}
-
-// make sure the process is traced.
-func TestStartControlledTraced(t *testing.T) {
-  argv := []string{"/bin/true"}
-  proc, err := StartUnderOurPurview(argv[0], argv)
+  state, err := proc.Wait()
   if err != nil {
-    t.Fatalf("could not create process")
+    t.Fatalf("waiting failed\n", err)
+    t.FailNow();
   }
-  sigchan := make(chan os.Signal, 1)
-  signal.Notify(sigchan, syscall.SIGSTOP)
-  _ = <-sigchan
-  t.Logf("received SIGSTOP");
-  _, err = proc.Wait()
-  if err != nil {
-    t.Fatalf("waiting failed")
+  if !state.Success() {
+    t.Fatalf("process was unsuccessful: %v\n", state);
   }
+  if !state.Exited() {
+    t.Fatalf("process did not exit!\n");
+  }
+  if state.Exited() { return; }
 }
