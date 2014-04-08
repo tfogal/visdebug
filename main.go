@@ -29,10 +29,21 @@ func readsymbols(filename string) {
     fmt.Printf("error opening bfd: %v\n", err);
     panic("bfd.OpenR");
   }
-  bfd.Symbols(desc);
+  symbols := bfd.Symbols(desc);
   if err = bfd.Close(desc) ; err != nil {
     fmt.Printf("error closing bfd: %v\n", err);
     panic("bfd.Close")
+  }
+
+  for _, symbol := range symbols {
+    fmt.Printf("0x%08x ", symbol.Address())
+    flags := "";
+    if(symbol.Local()) { flags += "LOCAL " } else { flags += "      " }
+    if(symbol.Global()) { flags += "GLOBAL " } else { flags += "       " }
+    if(symbol.Exported()) { flags += "EXPORT " } else { flags += "       " }
+    if(symbol.Debug()) { flags += "DBG " } else { flags += "    " }
+    if(symbol.Function()) { flags += "FQN " } else { flags += "    " }
+    fmt.Printf("%s %s\n", flags, symbol.Name());
   }
 }
 
