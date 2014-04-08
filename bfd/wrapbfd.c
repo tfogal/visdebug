@@ -1,5 +1,4 @@
 #include <inttypes.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include "bfd.h"
 
@@ -32,8 +31,6 @@ readsyms(bfd* b, unsigned* sz)
     return NULL;
   }
   *sz = (size_t)nsyms;
-  printf("c0 %p 0x%x\n", symtab[0]->name, symtab[0]->flags);
-  printf("c1 %p 0x%x\n", symtab[1]->name, symtab[1]->flags);
   return symtab;
 }
 

@@ -4,9 +4,7 @@ package bfd
 // #include "wrapbfd.h"
 // #cgo LDFLAGS: -lbfd
 import "C"
-import "encoding/binary"
 import "errors"
-import "fmt"
 import "reflect"
 import "unsafe"
 
@@ -67,6 +65,8 @@ type Symbol struct {
   addr uintptr
   flags uint
 }
+func (s *Symbol) Name() (string) { return s.name }
+func (s *Symbol) Address() (uintptr) { return s.addr }
 func (s *Symbol) Local() (bool) { return (s.flags & bfd_BSF_LOCAL) > 0; }
 func (s *Symbol) Global() (bool) { return (s.flags & bfd_BSF_GLOBAL) > 0; }
 func (s *Symbol) Exported() (bool) { return (s.flags & bfd_BSF_EXPORT) > 0; }
@@ -158,48 +158,37 @@ func Close(bfd *C.bfd) (error) {
 }
 
 func Symbols(bfd *C.bfd) ([]Symbol) {
-  table_size := C.symtabsz(bfd);
-  fmt.Printf("need %d bytes for the symbol table\n", table_size);
-
   flags := bfd.flags;
   if flags & bfd_HAS_SYMS == 0 {
-    fmt.Printf("no symbols, bailing.");
     return nil;
   }
   var nsymbols C.unsigned;
-  fmt.Println("loooking for symbs...");
   symtab := C.readsyms(bfd, &nsymbols);
   if symtab == nil {
-    panic("no symbols :-(");
+    panic("binary has symbols but no symbols given when read!")
   }
-  fmt.Printf("%d symbols\n", nsymbols);
 
-  /* Go won't let us our 'symtab'.  So hack it into a go slice first */
+  /* Go won't let us index our 'symtab'.  So hack it into a go slice first */
   var gosymtab []*C.asymbol;
   header := (*reflect.SliceHeader)((unsafe.Pointer(&gosymtab)));
   header.Cap = int(nsymbols);
   header.Len = int(nsymbols);
   header.Data = uintptr(unsafe.Pointer(symtab));
+
+  // now construct our return value: a slice of symbols.
   symbols := make([]Symbol, nsymbols);
   for i:=uint(0); i < uint(nsymbols); i++ {
     symbols[i].name = C.GoString(gosymtab[i].name)
-    //symbols[i].addr = uintptr(gosymtab[i].udata)
-    bytearr := gosymtab[i].udata[:]
-    symbols[i].addr = uintptr(binary.LittleEndian.Uint64(bytearr))
-    //symbols[i].addr = uintptr(C.addr(gosymtab[i]));
+    symbols[i].flags = uint(gosymtab[i].flags);
+
+    // the address we get from gosymtab[i].udata[:] is often null, and doesn't
+    // match up with 'nm' gives.  Not really sure what it is, yet, but
+    // 'bfd_symbol_info' seems to give back addresses that agree with 'nm'.
     var info C.symbol_info;
     C.bfd_symbol_info(gosymtab[i], &info);
     symbols[i].addr = uintptr(info.value);
-    symbols[i].flags = uint(gosymtab[i].flags);
   }
 
-  for i:=uint(0); i < uint(2); i++ {
-    name := C.GoString(gosymtab[i].name);
-    fmt.Printf("go %v 0x%x 0x%x\n", name, gosymtab[i].flags,
-               uint(gosymtab[i].flags));
-    fmt.Printf("g2 %s %v 0x%x\n", symbols[i].name, symbols[i].addr,
-               symbols[i].flags);
-  }
   C.free(unsafe.Pointer(symtab));
   return symbols;
 }
