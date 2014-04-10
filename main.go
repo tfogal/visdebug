@@ -2,6 +2,7 @@ package main;
 
 import(
   "./bfd"
+  "./cfg"
   "./debug"
   "fmt"
   "syscall"
@@ -54,8 +55,10 @@ func readsymbols(filename string) {
 
 func main() {
   //program := []string{"/bin/true"};
-  program := []string{"/tmp/a.out"};
+  program := []string{"/tmp/hw"};
   readsymbols(program[0]);
+
+  cfg.CFG(program[0]);
 
   proc, err := debug.StartUnderOurPurview(program[0], program)
   if err != nil {
