@@ -53,12 +53,53 @@ func readsymbols(filename string) {
   }
 }
 
+func nnodes(graph map[uintptr]*cfg.Node) (uint) {
+  seen := make(map[uintptr]bool)
+  nodes := uint(0)
+  for k, _ := range graph {
+    if seen[k] { continue; }
+    seen[k] = true
+    nodes++
+  }
+  return nodes
+}
+
+type gfunc func(node *cfg.Node) ();
+func inorder(graph map[uintptr]*cfg.Node, f gfunc) {
+  seen := make(map[uintptr]bool)
+  for k, v := range graph {
+    if seen[k] { continue; }
+    inorder_helper(v, seen, f)
+    seen[k] = true
+  }
+}
+func inorder_helper(node *cfg.Node, seen map[uintptr]bool, f gfunc) {
+  if seen[node.Addr] { return }
+  f(node)
+  seen[node.Addr] = true
+  for _, edge := range node.Edgelist {
+    inorder_helper(edge.To, seen, f)
+  }
+}
+
 func main() {
   //program := []string{"/bin/true"};
-  program := []string{"/tmp/hw"};
+  program := []string{"/tmp/hw"}
   readsymbols(program[0]);
 
-  cfg.CFG(program[0]);
+  graph := cfg.CFG(program[0])
+  nodecount := 0
+  count := func(node *cfg.Node) { nodecount++ }
+  inorder(graph, count)
+  fmt.Printf("cfg has %d(%d) nodes\n", nnodes(graph), nodecount)
+  nodeinfo := func(node *cfg.Node) {
+    fmt.Printf("{ '%s' 0x%08x [ ", node.Name, node.Addr)
+    for _, edge := range node.Edgelist {
+      fmt.Printf("0x%08x ", edge.To.Addr)
+    }
+    fmt.Printf("]\n")
+  }
+  inorder(graph, nodeinfo)
 
   proc, err := debug.StartUnderOurPurview(program[0], program)
   if err != nil {
