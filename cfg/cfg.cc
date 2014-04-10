@@ -12,19 +12,6 @@
 #include "compiler.h"
 #include "gocfg.h"
 
-struct edge {
-  uintptr_t from;
-  uintptr_t to;
-  unsigned flags;
-};
-
-struct node {
-  uintptr_t addr;
-  const char* name;   /* may be null. */
-  struct edge* edgelist; /* dynamically allocated. */
-  size_t edges;
-};
-
 using namespace Dyninst;
 using namespace ParseAPI;
 
