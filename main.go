@@ -36,6 +36,11 @@ func readsymbols(filename string) {
   }
 
   for _, symbol := range symbols {
+    // skip internal symbols.
+    if len(symbol.Name()) > 0 &&
+       (symbol.Name()[0] == '.' || symbol.Name()[0] == '_') {
+      continue;
+    }
     fmt.Printf("0x%08x ", symbol.Address())
     flags := "";
     if(symbol.Local()) { flags += "LOCAL " } else { flags += "      " }
