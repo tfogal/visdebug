@@ -26,7 +26,8 @@ struct node {
 
 using namespace Dyninst;
 using namespace ParseAPI;
-extern "C" struct node* cfg(const char* program, size_t* n_nodes);
+
+#ifdef MAIN
 static void printdot(const char* program);
 static void print_nodes(const struct node* nds, size_t nodes);
 static void free_nodes(struct node* nds, size_t nodes);
@@ -81,6 +82,7 @@ free_nodes(struct node* nds, size_t nodes)
   }
   free(nds);
 }
+#endif
 
 /* predicate for filtering functions we don't care about.  if it returns true,
  * we want to process that function. */
@@ -167,6 +169,7 @@ cfg(const char* program, size_t* n_nodes)
   return nodes;
 }
 
+#ifdef MAIN
 void
 printdot(const char* program)
 {
@@ -242,3 +245,4 @@ printdot(const char* program)
   }
   cout << "}" << endl;
 }
+#endif
