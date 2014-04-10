@@ -10,6 +10,7 @@
 #include "CodeObject.h"
 #include "CFG.h"
 #include "compiler.h"
+#include "gocfg.h"
 
 struct edge {
   uintptr_t from;
