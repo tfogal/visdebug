@@ -6,6 +6,8 @@ package cfg;
 // #cgo CXXFLAGS: -Wall -Wextra -I/home/tfogal/sw/include
 // #cgo LDFLAGS: -L/home/tfogal/sw/lib -lparseAPI -liberty -lz
 import "C"
+import "bytes"
+import "fmt"
 import "reflect"
 import "unsafe"
 
@@ -17,6 +19,16 @@ type Node struct {
   Name string // might be (often is) empty
   Addr uintptr
   Edgelist []*Edge
+}
+
+func (n *Node) String() string {
+  buf := bytes.NewBufferString("")
+  fmt.Fprintf(buf, "{'%s' 0x%08x [ ", n.Name, n.Addr)
+  for _, edge := range n.Edgelist {
+    fmt.Fprintf(buf, "0x%08x ", edge.To.Addr)
+  }
+  fmt.Fprintf(buf, "]}")
+  return buf.String()
 }
 
 func assert(conditional bool) {
