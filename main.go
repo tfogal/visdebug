@@ -5,6 +5,7 @@ import(
   "./cfg"
   "./debug"
   "fmt"
+  "os"
   "syscall"
 )
 
@@ -82,24 +83,36 @@ func inorder_helper(node *cfg.Node, seen map[uintptr]bool, f gfunc) {
   }
 }
 
+func fqnroot(cflow map[uintptr]*cfg.Node, name string) (*cfg.Node) {
+  for _, v := range cflow {
+    if v.Name == name { return v }
+  }
+  return nil
+}
+
+func assert(condition bool) {
+  if condition == false {
+    panic("assertion failure")
+  }
+}
+
 func main() {
-  //program := []string{"/bin/true"};
-  program := []string{"/tmp/hw"}
+  if len(os.Args) <= 1 {
+    fmt.Println("which program?")
+    return
+  }
+  program := os.Args[1:]
   readsymbols(program[0]);
 
   graph := cfg.CFG(program[0])
-  nodecount := 0
-  count := func(node *cfg.Node) { nodecount++ }
-  inorder(graph, count)
-  fmt.Printf("cfg has %d(%d) nodes\n", nnodes(graph), nodecount)
-  nodeinfo := func(node *cfg.Node) {
-    fmt.Printf("{ '%s' 0x%08x [ ", node.Name, node.Addr)
-    for _, edge := range node.Edgelist {
-      fmt.Printf("0x%08x ", edge.To.Addr)
-    }
-    fmt.Printf("]\n")
+  { // debugging:
+    nodecount := uint(0)
+    inorder(graph, func(node *cfg.Node) { nodecount++ })
+    assert(nnodes(graph) == nodecount)
   }
-  inorder(graph, nodeinfo)
+  //inorder(graph, func (node *cfg.Node) { fmt.Printf("%v\n", node); })
+
+  fmt.Printf("sfunc: %s\n", fqnroot(graph, "subfunc").Name)
 
   proc, err := debug.StartUnderOurPurview(program[0], program)
   if err != nil {
