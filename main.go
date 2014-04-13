@@ -96,6 +96,19 @@ func assert(condition bool) {
   }
 }
 
+// returns true iff this node has a child that points back to it.
+func loop1d(node *cfg.Node) (bool) {
+  for _, edge := range node.Edgelist {
+    target := edge.To
+    for _, childedge := range target.Edgelist {
+      if childedge.To.Addr == node.Addr {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 func main() {
   if len(os.Args) <= 1 {
     fmt.Println("which program?")
@@ -112,7 +125,9 @@ func main() {
   }
   //inorder(graph, func (node *cfg.Node) { fmt.Printf("%v\n", node); })
 
-  fmt.Printf("sfunc: %s\n", fqnroot(graph, "subfunc").Name)
+  subfunc := fqnroot(graph, "subfunc")
+  fmt.Printf("sfunc: %s\n", subfunc.Name)
+  fmt.Printf("loop1d (false): %v\n", loop1d(subfunc))
 
   proc, err := debug.StartUnderOurPurview(program[0], program)
   if err != nil {
