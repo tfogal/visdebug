@@ -99,3 +99,20 @@ func CFG(program string) (map[uintptr]*Node) {
 
   return cfg
 }
+
+// returns true if the node 'target' is reachable from 'from'.
+func Reachable(target *Node, from *Node) (bool) {
+  seen := make(map[uintptr]bool)
+  return reachable(target, from, seen)
+}
+
+func reachable(target *Node, from *Node, seen map[uintptr]bool) (bool) {
+  if seen[from.Addr] { return false }
+  seen[from.Addr] = true
+  for _, edge := range from.Edgelist {
+    if edge.To == target || reachable(target, edge.To, seen) {
+      return true
+    }
+  }
+  return false
+}
