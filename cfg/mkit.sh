@@ -1,3 +1,12 @@
-make || exit 1
-./printcfg /tmp/hw -dot > out.dot || exit 1
-xs dot -Tpng out.dot -o hw.png || exit 1
+#!/bin/sh
+
+function error {
+  echo "$@"
+  exit 1
+}
+
+if test -z "$1" ; then
+  error "need arg: program name."
+fi
+../cfg/printcfg ${1} -dot > ${1}.dot || exit 1
+xs dot -Tpng ${1}.dot -o ${1}.png || exit 1
