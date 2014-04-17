@@ -116,3 +116,34 @@ func reachable(target *Node, from *Node, seen map[uintptr]bool) (bool) {
   }
   return false
 }
+
+// reachable in a single step
+func reachable1(target *Node, from *Node) (bool) {
+  for _, edge := range from.Edgelist {
+    if edge.To == target { return true }
+  }
+  return false
+}
+
+func reachable2(target *Node, from *Node) (bool) {
+  for _, edge1 := range from.Edgelist {
+    node1 := edge1.To
+    for _, edge2 := range node1.Edgelist {
+      if edge2.To == target { return true }
+    }
+  }
+  return false
+}
+
+func reachable3(target *Node, from *Node) (bool) {
+  for _, edge1 := range from.Edgelist {
+    node1 := edge1.To
+    for _, edge2 := range node1.Edgelist {
+      node2 := edge2.To
+      for _, edge3 := range node2.Edgelist {
+        if edge3.To == target { return true }
+      }
+    }
+  }
+  return false
+}
