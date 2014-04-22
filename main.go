@@ -4,6 +4,7 @@ import(
   "./bfd"
   "./cfg"
   "./debug"
+  "flag"
   "fmt"
   "os"
   "syscall"
@@ -109,15 +110,31 @@ func loop1d(node *cfg.Node) (bool) {
   return false;
 }
 
+var program string
+var symlist bool
+var execute bool
+func init() {
+  flag.StringVar(&program, "exec", "", "program to analyze/work with")
+  flag.StringVar(&program, "e", "", "program to analyze/work with")
+  flag.BoolVar(&symlist, "symbols", false, "print out the symbol table")
+  flag.BoolVar(&symlist, "s", false, "print out the symbol table")
+  flag.BoolVar(&execute, "x", false, "execute subprogram")
+}
+
 func main() {
-  if len(os.Args) <= 1 {
-    fmt.Println("which program?")
+  flag.Parse()
+  if program == "" && flag.NArg() == 0 {
+    fmt.Fprintf(os.Stderr, "No program given!\n")
     return
   }
-  program := os.Args[1:]
-  readsymbols(program[0]);
+  if program == "" { program = flag.Arg(0) }
+  fmt.Printf("Using program '%s'\n", program)
 
-  graph := cfg.CFG(program[0])
+  if symlist {
+    readsymbols(program);
+  }
+
+  graph := cfg.CFG(program)
   { // debugging:
     nodecount := uint(0)
     inorder(graph, func(node *cfg.Node) { nodecount++ })
@@ -125,11 +142,19 @@ func main() {
   }
   //inorder(graph, func (node *cfg.Node) { fmt.Printf("%v\n", node); })
 
-  subfunc := fqnroot(graph, "subfunc")
-  fmt.Printf("sfunc: %s\n", subfunc.Name)
-  fmt.Printf("loop1d (false): %v\n", loop1d(subfunc))
+  // create a proper argv array that can be passed to exec(2)
+  argv := make([]string, 1)
+  argv[0] = program
+  argv = append(argv, flag.Args()...)
+  if len(argv) == 1 { argv = append(argv, argv[0]) }
 
-  proc, err := debug.StartUnderOurPurview(program[0], program)
+  if execute {
+    instrument(argv)
+  }
+}
+
+func instrument(argv []string) {
+  proc, err := debug.StartUnderOurPurview(argv[0], argv)
   if err != nil {
     fmt.Printf("could not start program: %v\n", err)
     panic("failed starting proc")
