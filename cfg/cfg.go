@@ -8,8 +8,13 @@ package cfg;
 import "C"
 import "bytes"
 import "fmt"
+import "math"
 import "reflect"
 import "unsafe"
+
+const(
+  cfg_INLOOP = (1 << 0)
+)
 
 type Edge struct {
   To *Node
@@ -19,6 +24,7 @@ type Node struct {
   Name string // might be (often is) empty
   Addr uintptr
   Edgelist []*Edge
+  flags uint
 }
 
 func (n *Node) String() string {
@@ -61,7 +67,7 @@ func CFG(program string) (map[uintptr]*Node) {
     // the node could have been created as a target of a previous edge, but if
     // so then we didn't know anything about it...
     if cfg[addr] == nil {
-      cfg[addr] = &Node{"", uintptr(0), nil}
+      cfg[addr] = &Node{"", uintptr(0), nil, 0}
     }
     // ... so we need to fill that stuff in anyway.
     cfg[addr].Name = C.GoString(gocfg[i].name)
@@ -115,6 +121,76 @@ func reachable(target *Node, from *Node, seen map[uintptr]bool) (bool) {
     }
   }
   return false
+}
+
+func LoopCalc(root *Node) {
+  seen := make(map[uintptr]bool)
+  loopcalc(root, seen)
+}
+func loopcalc(from* Node, seen map[uintptr]bool) {
+  if seen[from.Addr] { return }
+  seen[from.Addr] = true
+  for _, edge := range from.Edgelist {
+    if Reachable(from, edge.To) {
+      from.flags |= cfg_INLOOP
+    }
+    loopcalc(edge.To, seen)
+  }
+}
+func (n *Node) InLoop() (bool) { return n.flags & cfg_INLOOP > 0 }
+
+// counts the number of edges to 'target' from 'source'.  The 'source' edge
+// counts, so this is positive---or unreachable, which gives 0.
+func LoopDist(target *Node, source *Edge) (uint) {
+  seen := make(map[uintptr]bool)
+  return loopdist(target, source, seen)
+}
+
+func minu(a uint, b uint) (uint) {
+  if a < b {
+    return a
+  }
+  return b
+}
+/* valid value predicate */
+type vvaluep func(value uint) (bool)
+
+/* minimum for a vector of uint values, but accepts a predicate to determine
+ * whether a value is 'valid' or not. */
+func minuvp(values []uint, predicate vvaluep) (uint) {
+  ret := uint(math.MaxUint64)
+  for _, v := range values {
+    if predicate(v) {
+      ret = minu(ret, v)
+    }
+  }
+  return ret
+}
+
+func loopdist(target *Node, edge *Edge, seen map[uintptr]bool) (uint) {
+  if seen[edge.To.Addr] { return 0 }
+  seen[edge.To.Addr] = true
+
+  if edge.To.Addr == target.Addr {
+    return 1
+  }
+
+  // Is edge.To a leaf node?  Then 'ya can't get thar from here', as the
+  // Maineacs say.
+  if len(edge.To.Edgelist) == 0 { return 0 }
+
+  // the distance is 1+the distance from the node 'edge' points to.
+  // but 'edge.To' can have any number of outward edges, so there could be
+  // multiple paths to 'target'.  Compute the target along each edge.
+  distances := make([]uint, len(edge.To.Edgelist))
+  for i, subedge := range edge.To.Edgelist {
+    // we can't do 1+ here because we filter out the 0's later.
+    distances[i] = loopdist(target, subedge, seen)
+  }
+  nonzero := func(value uint) (bool) { return value > 0 }
+  /* the /shortest/ path is the one we want to report.
+   * also, don't forget the "1+" part! */
+  return 1 + minuvp(distances, nonzero)
 }
 
 // reachable in a single step

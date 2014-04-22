@@ -3,8 +3,7 @@ import "fmt"
 import "testing"
 
 func TestSingleNode(t *testing.T) {
-  return
-  n := &Node{"root", 0x00000042, nil};
+  n := &Node{"root", 0x00000042, nil, 0};
   fmt.Printf("test is running.\n")
   if Reachable(n, n) {
     t.Fatalf("node should not be reachable from itself.")
@@ -12,9 +11,8 @@ func TestSingleNode(t *testing.T) {
 }
 
 func TestSimpleLoop(t *testing.T) {
-  return
-  hd := &Node{"root", 0x00000042, nil }
-  tail := &Node{"sub", 0x00000084, nil }
+  hd := &Node{"root", 0x00000042, nil, 0}
+  tail := &Node{"sub", 0x00000084, nil, 0}
   hd.Edgelist = make([]*Edge, 1)
   tail.Edgelist = make([]*Edge, 1)
   hd.Edgelist[0] = &Edge{tail, 0}
@@ -35,10 +33,10 @@ func tassert(t *testing.T, conditional bool, msg string) {
 }
 
 func TestNormalLoop(t *testing.T) {
-  header := &Node{"funcentry", 0x00000001, nil }
-  looptest := &Node{"test", 0x00000002, nil }
-  body := &Node{"body", 0x00000004, nil }
-  post := &Node{"post", 0x00000008, nil }
+  header := &Node{"funcentry", 0x00000001, nil, 0}
+  looptest := &Node{"test", 0x00000002, nil, 0}
+  body := &Node{"body", 0x00000004, nil, 0}
+  post := &Node{"post", 0x00000008, nil, 0}
   header.Edgelist = make([]*Edge, 1)
   looptest.Edgelist = make([]*Edge, 2)
   body.Edgelist = make([]*Edge, 1)
