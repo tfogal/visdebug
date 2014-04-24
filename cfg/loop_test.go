@@ -75,27 +75,6 @@ func TestDistanceUnreachable(t *testing.T) {
   lassert(t, 0 == LoopDist(node2, node1.Edgelist[0]), "n2 !reachable from n1")
 }
 
-func findnode(from *Node, name string) (*Node) {
-  sn := make(map[uintptr]bool)
-  retval := findnode_h(from, name, sn)
-  if retval == nil {
-    panic("node was not found, test is broken.")
-  }
-  return retval
-}
-func findnode_h(srch *Node, name string, seen map[uintptr]bool) (*Node) {
-  if seen[srch.Addr] { return nil }
-  seen[srch.Addr] = true
-  if srch.Name == name {
-    return srch
-  }
-  for _, edge := range srch.Edgelist {
-    n := findnode_h(edge.To, name, seen)
-    if n != nil { return n }
-  }
-  return nil
-}
-
 type testinfo struct {
   source string
   edgeidx uint
