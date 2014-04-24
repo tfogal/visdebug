@@ -1,10 +1,8 @@
 package cfg
-import "fmt"
 import "testing"
 
 func TestSingleNode(t *testing.T) {
   n := mkNode("root", 0x00000042)
-  fmt.Printf("test is running.\n")
   if Reachable(n, n) {
     t.Fatalf("node should not be reachable from itself.")
   }
