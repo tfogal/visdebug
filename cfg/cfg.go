@@ -25,6 +25,10 @@ type Node struct {
   Addr uintptr
   Edgelist []*Edge
   flags uint
+  dominators map[uintptr]struct{}
+}
+func mkNode(name string, addr uintptr) (*Node) {
+  return &Node{name, addr, nil, 0, nil}
 }
 
 func (n *Node) String() string {
@@ -67,7 +71,7 @@ func CFG(program string) (map[uintptr]*Node) {
     // the node could have been created as a target of a previous edge, but if
     // so then we didn't know anything about it...
     if cfg[addr] == nil {
-      cfg[addr] = &Node{"", uintptr(0), nil, 0}
+      cfg[addr] = mkNode("", uintptr(0))
     }
     // ... so we need to fill that stuff in anyway.
     cfg[addr].Name = C.GoString(gocfg[i].name)

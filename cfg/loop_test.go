@@ -9,14 +9,14 @@ func lassert(t *testing.T, conditional bool, msg string) {
 }
 
 func TestSingleNodeLoop(t *testing.T) {
-  n := &Node{"root", 0x00000042, nil, 0};
+  n := mkNode("root", 0x00000042)
   LoopCalc(n)
   lassert(t, !n.InLoop(), "single node is not a loop.")
 }
 
 func TestSimpleLoopIsInLoop(t *testing.T) {
-  hd := &Node{"root", 0x00000042, nil, 0}
-  tail := &Node{"sub", 0x00000084, nil, 0}
+  hd := mkNode("root", 0x00000042)
+  tail := mkNode("sub", 0x00000084)
   hd.Edgelist = make([]*Edge, 1)
   tail.Edgelist = make([]*Edge, 1)
   hd.Edgelist[0] = &Edge{tail, 0}
@@ -28,9 +28,9 @@ func TestSimpleLoopIsInLoop(t *testing.T) {
 }
 
 func TestLoopWithExit(t *testing.T) {
-  ltest := &Node{"test", 0x00000042, nil, 0}
-  body := &Node{"body", 0x00000084, nil, 0}
-  done := &Node{"done", 0x00000096, nil, 0}
+  ltest := mkNode("test", 0x00000042)
+  body := mkNode("body", 0x00000084)
+  done := mkNode("done", 0x00000096)
   ltest.Edgelist = make([]*Edge, 1)
   body.Edgelist = make([]*Edge, 1)
   // no exit from 'done'.
@@ -44,8 +44,8 @@ func TestLoopWithExit(t *testing.T) {
 }
 
 func TestDistance2Node(t *testing.T) {
-  hd := &Node{"root", 0x00000042, nil, 0}
-  tail := &Node{"sub", 0x00000084, nil, 0}
+  hd := mkNode("root", 0x00000042)
+  tail := mkNode("sub", 0x00000084)
   hd.Edgelist = make([]*Edge, 1)
   tail.Edgelist = make([]*Edge, 1)
   hd.Edgelist[0] = &Edge{tail, 0}
@@ -57,10 +57,10 @@ func TestDistance2Node(t *testing.T) {
 
 func TestDistanceUnreachable(t *testing.T) {
   /* two isolated loops; should be mostly unreachable. */
-  node1 := &Node{"node1", 0x00000042, nil, 0}
-  n1sub := &Node{"n1chld", 0x00000084, nil, 0}
-  node2 := &Node{"node2", 0x00000019, nil, 0}
-  n2sub := &Node{"n2chld", 0x00000038, nil, 0}
+  node1 := mkNode("node1", 0x00000042)
+  n1sub := mkNode("n1chld", 0x00000084)
+  node2 := mkNode("node2", 0x00000019)
+  n2sub := mkNode("n2chld", 0x00000038)
   node1.Edgelist = make([]*Edge, 1)
   n1sub.Edgelist = make([]*Edge, 1)
   node1.Edgelist[0] = &Edge{n1sub, 0}
@@ -81,16 +81,16 @@ func TestDistanceUnreachable(t *testing.T) {
  * boundaries (which would create 3 more 1D loops), but it is fine for a test
  * program. */
 func smooth2() (*Node) {
-  entry := &Node{"smooth2", 0x4007e7, nil, 0} // also 4007e7, FWIW.
-  n4008e8 := &Node{"4008e8", 0x4008e8, nil, 0}
-  n4007fc := &Node{"4007fc", 0x4007fc, nil, 0}
-  n4008fd := &Node{"4008fd", 0x4008fd, nil, 0}
-  n400b20 := &Node{"400b20", 0x400b20, nil, 0}
-  n40090a := &Node{"40090a", 0x40090a, nil, 0}
-  n400b35 := &Node{"400b35", 0x400b35, nil, 0}
-  n400b06 := &Node{"400b06", 0x400b06, nil, 0}
-  n400b1b := &Node{"400b1b", 0x400b1b, nil, 0}
-  n400917 := &Node{"400917", 0x400917, nil, 0}
+  entry := mkNode("smooth2", 0x4007e7) // also 4007e7, FWIW.
+  n4008e8 := mkNode("4008e8", 0x4008e8)
+  n4007fc := mkNode("4007fc", 0x4007fc)
+  n4008fd := mkNode("4008fd", 0x4008fd)
+  n400b20 := mkNode("400b20", 0x400b20)
+  n40090a := mkNode("40090a", 0x40090a)
+  n400b35 := mkNode("400b35", 0x400b35)
+  n400b06 := mkNode("400b06", 0x400b06)
+  n400b1b := mkNode("400b1b", 0x400b1b)
+  n400917 := mkNode("400917", 0x400917)
 
   entry.Edgelist = make([]*Edge, 1)
   entry.Edgelist[0] = &Edge{n4008e8, 0}
