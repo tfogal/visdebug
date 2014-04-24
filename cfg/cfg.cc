@@ -19,14 +19,18 @@ using namespace ParseAPI;
 static void printdot(const char* program);
 static void print_nodes(const struct node* nds, size_t nodes);
 static void free_nodes(struct node* nds, size_t nodes);
+/* should the program filter out C library/other uninteresting functions? */
+static bool filter = false;
+/* produce a dot-format output instead of a default custom output? */
+static bool dot = false;
 
 int
 main(int argc, char* argv[])
 {
-  bool dot = false;
   if(argc <= 1) { std::cerr << "not enough args.\n"; return -1; }
-  if(argc == 3 && strcmp(argv[2], "-dot") == 0) {
-    dot = true;
+  for(int a=1; a < argc; a++) {
+    if(strcmp(argv[a], "-dot") == 0) { dot = true; }
+    if(strcmp(argv[a], "-filter") == 0) { filter = true; }
   }
 
   if(dot) {
@@ -158,6 +162,11 @@ cfg(const char* program, size_t* n_nodes)
 }
 
 #ifdef MAIN
+/* functions to remove/ignore. */
+static const std::array<std::string,7> ignored = {
+  "atoi", "deregister_tm_clones", "fwrite", "frame_dummy", "printf", //"puts",
+  "register_tm_clones"
+};
 void
 printdot(const char* program)
 {
@@ -183,6 +192,11 @@ printdot(const char* program)
     if(f->name().empty()) { continue; }
     //            blocks with names starting with _ are the runtime's.
     if(f->name().front() == '_') { continue; }
+    // skip any functions in our list of ignored functions.
+    if(filter && std::count_if(ignored.begin(), ignored.end(),
+       [&](const std::string& s) { return s == f->name(); }) > 0) {
+      continue;
+    }
 
     // Make a cluster for nodes of this function
     cout << "\t subgraph cluster_" << i
