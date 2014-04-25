@@ -16,6 +16,13 @@ const(
   cfg_INLOOP = (1 << 0)
 )
 
+// set for keeping track of per-node dominance.  all corresponding functions
+// never modify a set: they instead return a new set with the appropriate
+// semantics.
+type domset struct {
+  set map[uintptr]bool
+}
+
 type Edge struct {
   To *Node
   flags uint
@@ -25,10 +32,10 @@ type Node struct {
   Addr uintptr
   Edgelist []*Edge
   flags uint
-  dominators map[uintptr]struct{}
+  Dominators domset
 }
 func mkNode(name string, addr uintptr) (*Node) {
-  return &Node{name, addr, nil, 0, nil}
+  return &Node{name, addr, nil, 0, nullset()}
 }
 
 func (n *Node) String() string {
@@ -196,6 +203,92 @@ func loopdist(target *Node, edge *Edge, seen map[uintptr]bool) (uint) {
    * also, don't forget the "1+" part! */
   return 1 + minuvp(distances, nonzero)
 }
+
+func nullset() (domset) {
+  var dom domset
+  dom.set = make(map[uintptr]bool)
+  return dom
+}
+// unions the two sets together.
+func union(a domset, b domset) (domset) {
+  var dom domset
+  dom.set = make(map[uintptr]bool, len(a.set) + len(b.set))
+  for ptr, _ := range a.set {
+    dom.set[ptr] = true
+  }
+  for ptr, _ := range b.set {
+    dom.set[ptr] = true
+  }
+  return dom
+}
+func intersection(a domset, b domset) (domset) {
+  var result domset
+  result.set = make(map[uintptr]bool)
+  for ptrA, _ := range a.set {
+    _, found := b.set[ptrA]
+    if found {
+      result.set[ptrA] = true
+    }
+  }
+  return result
+}
+func exclude(a domset, elem uintptr) (domset) {
+  null := nullset()
+  dom := union(a, null) // basically 'copy a'
+  delete(dom.set, elem)
+  return dom
+}
+// construct a singleton set out of the given pointer.
+func set(address uintptr) (domset) {
+  dom := nullset()
+  dom.set[address] = true
+  return dom
+}
+func sameset(a domset, b domset) (bool) {
+  return len(intersection(a,b).set) == len(a.set)
+}
+
+// calculates the dominance set for every node in the graph.  modifies the
+// graph itself.
+func Dominance(root* Node) {
+  // initialize root node's dominance set to just be itself.
+  root.Dominators = set(root.Addr)
+  // now recurse on root's children.
+  for _, edge := range root.Edgelist {
+    dominance(edge.To, root)
+  }
+}
+/* recursive dominance calculation.  this computation is a bit different than
+ * the way the algorithm is normally formulated.  textbooks tend to define this
+ * in terms of a corresponding 'predecessor' set, which is the set of all nodes
+ * which lead to the node given as argument.  However, since our edges are
+ * one-way, computing the predecessor set from the node itself is difficult in
+ * most cases and impossible in others.
+ * If you think of the classic algorithm as 'backward propagating', then this
+ * is 'forward propagating'.  It is less efficient than the O(n^2) achievable
+ * normally: In the presence of cycles, we will visit each node in the cycle
+ * n_{cycles} times.  Not a big deal for us.
+ * The gist of it is that we only recurse when something changes.  The first
+ * time through the graph is, however, a special case in which something always
+ * changes. */
+func dominance(chld *Node, parent *Node) {
+  incoming := union(parent.Dominators, set(chld.Addr))
+  if sameset(chld.Dominators, nullset()) { // first time we're here, init.
+    chld.Dominators = incoming
+  } else {
+    // we've been here before.  will our update change anything?
+    if sameset(chld.Dominators, intersection(chld.Dominators, incoming)) {
+      // if it won't change anything, then bail.
+      return
+    }
+    chld.Dominators = intersection(chld.Dominators, incoming)
+  }
+  for _, edge := range chld.Edgelist {
+    // calc dominance of children, and report if they changed, too.
+    dominance(edge.To, chld)
+  }
+}
+
 
 // reachable in a single step
 func reachable1(target *Node, from *Node) (bool) {
