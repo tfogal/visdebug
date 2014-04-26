@@ -38,9 +38,4 @@ func TestDominance(t *testing.T) {
       t.Error("For", tst, "expected:", tst.dominance, "got", node.Dominators)
     }
   }
-/*
-  abc := findnode(entry, "4008e8")
-  dset := domset{domtests[0].dominance}
-  lassert(t, sameset(abc.Dominators, dset), "blah")
-*/
 }
