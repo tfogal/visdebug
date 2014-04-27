@@ -1,7 +1,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 
-static void nestedloop(const int v, size_t n) {
+static void iffollowingif(const int v) {
   if(v > 36) {
     puts("hi");
   }
@@ -13,12 +13,12 @@ static void nestedloop(const int v, size_t n) {
 }
 
 int main(int argc, char* argv[]) {
-  if(argc < 3) {
-    fprintf(stderr, "need arg: integer, num\n");
+  if(argc < 2) {
+    fprintf(stderr, "need arg: integer\n");
     return EXIT_FAILURE;
   }
   int arg = atoi(argv[1]);
-  nestedloop(arg, (size_t)atoi(argv[2]));
+  iffollowingif(arg);
 
   return 0;
 }
