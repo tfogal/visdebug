@@ -23,6 +23,8 @@ type domset struct {
   set map[uintptr]bool
 }
 
+func (d *domset) Len() uint { return uint(len(d.set)); }
+
 type Edge struct {
   To *Node
   flags uint

@@ -6,6 +6,7 @@ import(
   "flag"
   "fmt"
   "os"
+  "strings"
   "syscall"
   "github.com/eaburns/ptrace"
 )
@@ -110,15 +111,72 @@ func loop1d(node *cfg.Node) (bool) {
   return false;
 }
 
+func lerp(val uint, imin uint,imax uint, omin uint,omax uint) (uint) {
+  assert(imin < imax)
+  assert(omin < omax)
+  return uint(float64(omin) + float64(val-imin) *
+                              float64(omax-omin) / float64(imax-imin))
+}
+
+// prints out a node in 'dot' notation.
+func dotNode(node *cfg.Node) {
+  fmt.Printf("\t\t\"0x%08x\" [", node.Addr)
+  if(node.Name != "") {
+    fmt.Printf("label = \"%s\", ", node.Name)
+  }
+  col := lerp(node.Dominators.Len(), 0,25, 0,255)
+  assert(col <= 255)
+  if(node.Dominators.Len() == 0) {
+    fmt.Printf("color=\"#ff0000\"");
+  } else {
+    fmt.Printf("color=\"#00%x00\"", col)
+  }
+  fmt.Printf("];\n");
+
+  for _, edge := range node.Edgelist {
+    fmt.Printf("\t\t\"0x%08x\" -> \"0x%08x\";\n", node.Addr, edge.To.Addr)
+  }
+}
+
+func findNodeByName(graph map[uintptr]*cfg.Node, name string) (*cfg.Node) {
+  seen := make(map[uintptr]bool)
+  for k, v := range graph {
+    node := find_helper(v, seen, name)
+    if node != nil && node.Name == name { return node }
+    seen[k] = true
+  }
+  return nil
+}
+func
+find_helper(node *cfg.Node, seen map[uintptr]bool, name string) (*cfg.Node) {
+  if seen[node.Addr] { return nil }
+  if node.Name == name { return node }
+  seen[node.Addr] = true
+  for _, edge := range node.Edgelist {
+    found := find_helper(edge.To, seen, name)
+    if found != nil && found.Name == name { return found }
+  }
+  return nil
+}
+
 var program string
 var symlist bool
 var execute bool
+var dotcfg bool
 func init() {
   flag.StringVar(&program, "exec", "", "program to analyze/work with")
   flag.StringVar(&program, "e", "", "program to analyze/work with")
   flag.BoolVar(&symlist, "symbols", false, "print out the symbol table")
   flag.BoolVar(&symlist, "s", false, "print out the symbol table")
   flag.BoolVar(&execute, "x", false, "execute subprogram")
+  flag.BoolVar(&dotcfg, "cfg", false, "compute and print CFG")
+}
+
+func basename(s string) (string) {
+  if i := strings.LastIndex(s, "/"); i != -1 {
+    return s[i+1:]
+  }
+  return s
 }
 
 func main() {
@@ -128,19 +186,20 @@ func main() {
     return
   }
   if program == "" { program = flag.Arg(0) }
-  fmt.Printf("Using program '%s'\n", program)
 
   if symlist {
     readsymbols(program);
   }
 
-  graph := cfg.CFG(program)
-  { // debugging:
-    nodecount := uint(0)
-    inorder(graph, func(node *cfg.Node) { nodecount++ })
-    assert(nnodes(graph) == nodecount)
+  if(dotcfg) {
+    graph := cfg.CFG(program)
+    root := findNodeByName(graph, "main")
+    assert(root != nil)
+    cfg.Dominance(root)
+    fmt.Printf("digraph %s {\n", basename(program))
+    inorder(graph, dotNode)
+    fmt.Println("}");
   }
-  //inorder(graph, func (node *cfg.Node) { fmt.Printf("%v\n", node); })
 
   // create a proper argv array that can be passed to exec(2)
   argv := make([]string, 1)
