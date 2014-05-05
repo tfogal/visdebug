@@ -2,24 +2,14 @@ package debug;
 
 import(
   "errors"
-  "fmt"
   "os"
-  "../ptrace"
   "runtime"
   "syscall"
 )
 
-func Test() {
-  fmt.Println("a test");
-}
-
 var(
   chld *os.Process
 )
-
-func Blah() {
-  ptrace.Testing()
-}
 
 func StartUnderOurPurview(program string, arguments []string) (*os.Process, error) {
   sattr := syscall.SysProcAttr{
