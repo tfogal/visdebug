@@ -3,11 +3,11 @@ package main;
 import(
   "./bfd"
   "./cfg"
-  "./debug"
   "flag"
   "fmt"
   "os"
   "syscall"
+  "github.com/eaburns/ptrace"
 )
 
 func procstatus(pid int, stat syscall.WaitStatus) {
@@ -154,40 +154,22 @@ func main() {
 }
 
 func instrument(argv []string) {
-  proc, err := debug.StartUnderOurPurview(argv[0], argv)
+  proc, err := ptrace.Exec(argv[0], argv)
   if err != nil {
     fmt.Printf("could not start program: %v\n", err)
     panic("failed starting proc")
   }
 
-  var insns uint64
-  insns = 0
-
-  var wstat syscall.WaitStatus
-  _, err = syscall.Wait4(proc.Pid, &wstat, 0, nil)
-  if err != nil {
-    fmt.Printf("wait4 error: %v\n", err)
-    panic("wait")
-  }
-
-  for wstat.Stopped() {
-    insns++;
-    if wstat.Exited() { break }
-    var regs syscall.PtraceRegs
-    err = syscall.PtraceGetRegs(proc.Pid, &regs)
+  insns := uint64(0)
+  for _ = range proc.Events() {
+    insns++
+    err = proc.SingleStep()
     if err != nil {
-      fmt.Printf("get regs error: %v\n", err);
-      break;
-    }
-    err = syscall.PtraceSingleStep(proc.Pid);
-    if err != nil {
-      panic("single step")
-    }
-    _, err = syscall.Wait4(proc.Pid, &wstat, 0, nil)
-    if err != nil {
-      fmt.Printf("wait4 error: %v\n", err)
-      panic("wait")
+      fmt.Fprintf(os.Stderr, "singlestep failed: %v\n", err)
     }
   }
-  fmt.Printf("%d instructions\n", insns)
+  if err := proc.Error(); err != nil {
+    fmt.Fprintf(os.Stderr, "error: %v\n", err)
+  }
+  fmt.Printf("%d instructions.\n", insns)
 }
