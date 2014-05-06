@@ -1,14 +1,15 @@
 package main;
 
 import(
-  "./bfd"
-  "./cfg"
+  "bufio"
   "flag"
   "fmt"
   "os"
   "strings"
   "syscall"
   "github.com/eaburns/ptrace"
+  "./bfd"
+  "./cfg"
 )
 
 func procstatus(pid int, stat syscall.WaitStatus) {
@@ -212,6 +213,28 @@ func main() {
   }
 }
 
+type Command interface{}
+func commands() (chan Command) {
+  cmds := make(chan Command)
+  go func() {
+    rdr := bufio.NewReader(os.Stdin)
+    for {
+      <- cmds // wait for 'green light' from our parent.
+      fmt.Printf("> ")
+      os.Stdout.Sync()
+      s, err := rdr.ReadString('\n')
+      if err != nil {
+        fmt.Fprintf(os.Stderr, "error scanning line: %v\n", err)
+        cmds <- nil
+        close(cmds)
+        return
+      }
+      cmds <- strings.TrimSpace(s)
+    }
+  }()
+  return cmds
+}
+
 func instrument(argv []string) {
   proc, err := ptrace.Exec(argv[0], argv)
   if err != nil {
@@ -219,16 +242,27 @@ func instrument(argv []string) {
     panic("failed starting proc")
   }
 
+  cmds := commands()
+  cmds <- nil
+
+  events := proc.Events()
+
   insns := uint64(0)
-  for _ = range proc.Events() {
-    insns++
-    err = proc.SingleStep()
-    if err != nil {
-      fmt.Fprintf(os.Stderr, "singlestep failed: %v\n", err)
+  for {
+    select {
+      case status := <-events:
+        if syscall.WaitStatus(status).Exited() {
+          fmt.Printf("\nprogram terminated.  %d instructions.\n", insns)
+          return
+        }
+        insns++
+        if err := proc.SingleStep() ; err != nil {
+          fmt.Fprintf(os.Stderr, "single stepping failed: %v\n", err)
+          return
+        }
+      case cmd := <-cmds:
+        fmt.Printf("received command: '%s'\n", cmd)
+        cmds <- nil
     }
   }
-  if err := proc.Error(); err != nil {
-    fmt.Fprintf(os.Stderr, "error: %v\n", err)
-  }
-  fmt.Printf("%d instructions.\n", insns)
 }
