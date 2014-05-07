@@ -213,7 +213,16 @@ func main() {
   }
 }
 
-type Command interface{}
+type Command interface{
+  Execute(*ptrace.Tracee) (error)
+}
+type cgeneric struct {
+  args string
+}
+func (c cgeneric) Execute(proc *ptrace.Tracee) (error) {
+  fmt.Printf("cmd: %s\n", c.args)
+  return nil
+}
 func commands() (chan Command) {
   cmds := make(chan Command)
   go func() {
@@ -229,7 +238,8 @@ func commands() (chan Command) {
         close(cmds)
         return
       }
-      cmds <- strings.TrimSpace(s)
+      cgen := cgeneric{strings.TrimSpace(s)}
+      cmds <- cgen
     }
   }()
   return cmds
@@ -261,7 +271,7 @@ func instrument(argv []string) {
           return
         }
       case cmd := <-cmds:
-        fmt.Printf("received command: '%s'\n", cmd)
+        cmd.Execute(proc)
         cmds <- nil
     }
   }
