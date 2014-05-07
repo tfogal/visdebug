@@ -2,12 +2,13 @@ package main;
 
 import(
   "bufio"
+  "errors"
   "flag"
   "fmt"
   "os"
   "strings"
   "syscall"
-  "github.com/eaburns/ptrace"
+  "github.com/tfogal/ptrace"
   "./bfd"
   "./cfg"
 )
@@ -217,11 +218,44 @@ type Command interface{
   Execute(*ptrace.Tracee) (error)
 }
 type cgeneric struct {
-  args string
+  args []string
 }
 func (c cgeneric) Execute(proc *ptrace.Tracee) (error) {
   fmt.Printf("cmd: %s\n", c.args)
   return nil
+}
+type ccontinue struct {
+  args []string
+}
+type cparseerror struct {}
+func (c cparseerror) Execute(proc *ptrace.Tracee) (error) {
+  fmt.Fprintf(os.Stderr, "error parsing command.\n")
+  return errors.New("Parsing")
+}
+func (c ccontinue) Execute(proc *ptrace.Tracee) (error) {
+  fmt.Printf("continuing ... %v\n", c.args)
+  err := proc.Continue()
+  return err
+}
+type cstep struct{} // needs no args.
+func (c cstep) Execute(proc *ptrace.Tracee) (error) {
+  err := proc.SingleStep()
+  return err
+}
+type cstop struct{}
+func (c cstop) Execute(proc *ptrace.Tracee) (error) {
+  err := proc.SendSignal(syscall.SIGSTOP)
+  return err
+}
+func parse_cmdline(line string) (Command) {
+  tokens := strings.Split(line, " ")
+  if len(tokens) == 0 { return cparseerror{} }
+  switch(tokens[0]) {
+    case "continue": return ccontinue{tokens[1:len(tokens)]}
+    case "step": return cstep{}
+    case "break": return cstop{} // opposite of 'continue' :-)
+    default: return cgeneric{tokens}
+  }
 }
 func commands() (chan Command) {
   cmds := make(chan Command)
@@ -238,8 +272,8 @@ func commands() (chan Command) {
         close(cmds)
         return
       }
-      cgen := cgeneric{strings.TrimSpace(s)}
-      cmds <- cgen
+      cmd := parse_cmdline(strings.TrimSpace(s))
+      cmds <- cmd
     }
   }()
   return cmds
@@ -253,26 +287,23 @@ func instrument(argv []string) {
   }
 
   cmds := commands()
-  cmds <- nil
 
   events := proc.Events()
+  fmt.Println("startup complete.  what is your command?")
 
-  insns := uint64(0)
+  cmds <- nil
   for {
     select {
       case status := <-events:
         if syscall.WaitStatus(status).Exited() {
-          fmt.Printf("\nprogram terminated.  %d instructions.\n", insns)
-          return
-        }
-        insns++
-        if err := proc.SingleStep() ; err != nil {
-          fmt.Fprintf(os.Stderr, "single stepping failed: %v\n", err)
+          fmt.Println("\nprogram terminated.")
           return
         }
       case cmd := <-cmds:
-        cmd.Execute(proc)
-        cmds <- nil
+        if err := cmd.Execute(proc) ; err != nil {
+          fmt.Fprintf(os.Stderr, "error executing command: %v\n", err)
+        }
+        cmds <- nil // signal that receiver can output && read next command
     }
   }
 }
