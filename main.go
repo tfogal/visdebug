@@ -295,7 +295,7 @@ func instrument(argv []string) {
   for {
     select {
       case status := <-events:
-        if syscall.WaitStatus(status).Exited() {
+        if status.(syscall.WaitStatus).Exited() {
           fmt.Println("\nprogram terminated.")
           return
         }
