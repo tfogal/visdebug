@@ -4,7 +4,7 @@ package cfg;
 // #include "gocfg.h"
 // #cgo CXXFLAGS: -std=c++11
 // #cgo CXXFLAGS: -Wall -Wextra -I/home/tfogal/sw/include
-// #cgo LDFLAGS: -L/home/tfogal/sw/lib -lparseAPI -liberty -lz
+// #cgo LDFLAGS: -L/home/tfogal/sw/lib -lparseAPI -lsymLite -liberty -lz
 import "C"
 import "bytes"
 import "fmt"
