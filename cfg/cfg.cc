@@ -110,9 +110,11 @@ cfg(const char* program, size_t* n_nodes)
 
   // SymtabCodeSource modifies the damn argument.
   char* prog = strdup(program);
-  SymtabCodeSource* sts = new SymtabCodeSource(prog);
+  std::unique_ptr<SymtabCodeSource> sts(new SymtabCodeSource(prog));
   free(prog);
-  std::unique_ptr<CodeObject> co(new CodeObject(sts));
+  // we can't make this a unique_ptr because sts needs to be deleted before the
+  // CodeObject, else DynInst blows up and everything breaks.
+  CodeObject* co = new CodeObject(sts.get());
 
   // Parse the binary
   co->parse();
@@ -158,6 +160,7 @@ cfg(const char* program, size_t* n_nodes)
       n++;
     }
   }
+  delete co;
   return nodes;
 }
 
