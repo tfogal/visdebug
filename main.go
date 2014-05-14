@@ -247,13 +247,34 @@ func (c cstop) Execute(proc *ptrace.Tracee) (error) {
   err := proc.SendSignal(syscall.SIGSTOP)
   return err
 }
+type cstatus struct{}
+func (c cstatus) Execute(proc *ptrace.Tracee) (error) {
+  var wstat syscall.WaitStatus
+  _, err := syscall.Wait4(proc.PID(), &wstat, syscall.WNOHANG |
+                          syscall.WUNTRACED | syscall.WCONTINUED, nil)
+  if err != nil { return err }
+  procstatus(proc.PID(), wstat)
+  return nil
+}
+type cquit struct{}
+func (c cquit) Execute(proc *ptrace.Tracee) (error) {
+  if err := proc.SendSignal(syscall.SIGKILL) ; err != nil {
+    return err
+  }
+  return nil
+}
+
 func parse_cmdline(line string) (Command) {
   tokens := strings.Split(line, " ")
   if len(tokens) == 0 { return cparseerror{} }
   switch(tokens[0]) {
+    case "cont": fallthrough
     case "continue": return ccontinue{tokens[1:len(tokens)]}
     case "step": return cstep{}
     case "break": return cstop{} // opposite of 'continue' :-)
+    case "status": return cstatus{}
+    case "quit": return cquit{}
+    case "exit": return cquit{}
     default: return cgeneric{tokens}
   }
 }
@@ -289,14 +310,21 @@ func instrument(argv []string) {
   cmds := commands()
 
   events := proc.Events()
-  fmt.Println("startup complete.  what is your command?")
+  fmt.Println("Please state the nature of the debugging emergency.")
 
   cmds <- nil
   for {
     select {
       case status := <-events:
+        if status == nil {
+          proc.Close()
+          close(cmds)
+          return
+        }
         if status.(syscall.WaitStatus).Exited() {
           fmt.Println("\nprogram terminated.")
+          proc.Close()
+          close(cmds)
           return
         }
       case cmd := <-cmds:
