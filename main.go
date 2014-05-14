@@ -247,13 +247,37 @@ func (c cstop) Execute(proc *ptrace.Tracee) (error) {
   err := proc.SendSignal(syscall.SIGSTOP)
   return err
 }
+type cpid struct{}
+func (c cpid) Execute(proc *ptrace.Tracee) (error) {
+  fmt.Printf("%d\n", proc.PID())
+  return nil
+}
 type cstatus struct{}
 func (c cstatus) Execute(proc *ptrace.Tracee) (error) {
-  var wstat syscall.WaitStatus
-  _, err := syscall.Wait4(proc.PID(), &wstat, syscall.WNOHANG |
-                          syscall.WUNTRACED | syscall.WCONTINUED, nil)
+
+  fn := fmt.Sprintf("/proc/%d/stat", proc.PID())
+  file, err := os.Open(fn)
   if err != nil { return err }
-  procstatus(proc.PID(), wstat)
+  defer file.Close()
+  var pid int
+  var name string
+  var state rune
+  n, err := fmt.Fscanf(file, "%d %s %c", &pid, &name, &state)
+  if err != nil { return err }
+  if n <= 1 {
+    return errors.New("could not scan enough")
+  }
+  fmt.Printf("process %d is ", proc.PID())
+  switch(state) {
+    case 'D': fmt.Printf("uninterruptible sleep (io?)\n"); break
+    case 'R': fmt.Printf("running\n"); break
+    case 'S': fmt.Printf("sleeping\n"); break
+    case 't': fmt.Printf("stopped (tracing)\n"); break
+    case 'W': fmt.Printf("(impossibly) paging\n"); break
+    case 'X': fmt.Printf("(impossibly) dead\n"); break
+    case 'Z': fmt.Printf("awaits reaping.\n"); break
+    default: fmt.Printf("unknown?!\n"); break
+  }
   return nil
 }
 type cquit struct{}
@@ -270,11 +294,13 @@ func parse_cmdline(line string) (Command) {
   switch(tokens[0]) {
     case "cont": fallthrough
     case "continue": return ccontinue{tokens[1:len(tokens)]}
+    case "pid": return cpid{}
+    case "quit": fallthrough
+    case "exit": return cquit{}
+    case "stat": fallthrough
+    case "status": return cstatus{}
     case "step": return cstep{}
     case "break": return cstop{} // opposite of 'continue' :-)
-    case "status": return cstatus{}
-    case "quit": return cquit{}
-    case "exit": return cquit{}
     default: return cgeneric{tokens}
   }
 }
