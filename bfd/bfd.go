@@ -2,6 +2,7 @@ package bfd
 // #include <stdlib.h>
 // #include <bfd.h>
 // #include "wrapbfd.h"
+// #cgo CFLAGS: -std=gnu99
 // #cgo LDFLAGS: -lbfd
 import "C"
 import "errors"
@@ -143,6 +144,7 @@ func OpenR(filename string, target string) (*C.bfd, error) {
   err = C.bfd_check_format_matches(bfd, bfd_object, nil);
   if err == FALSE {
     Close(bfd);
+    // Two points for honesty.
     return nil, errors.New("(BFD) i honestly do not know.");
   }
 
