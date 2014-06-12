@@ -1,8 +1,11 @@
 #include <assert.h>
 #include <errno.h>
 #include <inttypes.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <sys/ptrace.h>
+#include <sys/types.h>
+#include <unistd.h>
 #include "bfd.h"
 
 size_t symtabsz(bfd* b) {
@@ -52,7 +55,14 @@ rd_inferior(bfd_vma vma, bfd_byte* into, bfd_size_type bytes) {
   }
   return 0;
 }
+
 bfd*
-bfd_from_inferior(bfd* template, uintptr_t vma, size_t len, pid_t pid) {
+bfd_from_inferior(bfd* template, uintptr_t vma, pid_t pid) {
   inferior_pid = pid;
+  errno = 0;
+  bfd* rv = bfd_elf_bfd_from_remote_memory(template, vma, NULL, rd_inferior);
+  if(!rv) {
+    perror("creating bfd from mem");
+  }
+  return rv;
 }

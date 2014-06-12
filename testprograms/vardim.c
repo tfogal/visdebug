@@ -72,6 +72,7 @@ int main(int argc, char* argv[]) {
       return EXIT_FAILURE;
     }
   }
+  printf("%s finished.\n", argv[0]);
 
   return 0;
 }

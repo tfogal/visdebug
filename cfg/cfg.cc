@@ -187,7 +187,7 @@ printdot(const char* program)
 
   const CodeObject::funclist& all = co->funcs();
 
-  cout << "digraph G {" << endl;
+  cout << "digraph Gdot {" << endl;
   auto fit = all.begin();
   for(int i = 0; fit != all.end(); ++fit, i++) { // i is index for clusters
     /*const*/ Function *f = *fit;
