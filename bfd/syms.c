@@ -443,9 +443,10 @@ read_symtab(rdinf* rd) {
 
   Elf64_Ehdr ehdr;
   if(rd(&ehdr, sizeof(Elf64_Ehdr), 0) != (int)sizeof(Elf64_Ehdr)) {
-    fprintf(stderr, "could not read sec ELF header.\n");
+    fprintf(stderr, "could not read ELF header.\n");
     return NULL;
   }
+  fprintf(stderr, "load time address: 0x%0lx\n", ehdr.e_entry);
   assert(valid_header(&ehdr));
 
   symtable_t* sym = calloc(1, sizeof(symtable_t));
@@ -669,7 +670,7 @@ filter_symbols(const symtable_t* sy, symfilt* youshallpass, void* user) {
   newsym->n = 0;
   newsym->bols = calloc(sy->n, sizeof(symbol));
   for(size_t i=0; i < sy->n; ++i) {
-    if(!youshallpass(sy->bols[i],user)) {continue;} /*Gandalf would be proud.*/
+    if(!youshallpass(sy->bols[i],user)) {continue;} /* RIP Gandalf the Grey. */
     /* strdup: we need/want to deepcopy. */
     newsym->bols[newsym->n].name = strdup(sy->bols[i].name);
     newsym->bols[newsym->n].address = sy->bols[i].address;
@@ -828,18 +829,8 @@ main(int argc, char *argv[]) {
      * addresses in that file.
      * So, for now, this suffices. */
     if(true || strstr(lmap->l_name, "ld-linux-x86-64")) {
-      /* After accounting for the normal relocation, the symbols in
-       * ld-linux-x86-64*so are all off by a constant factor.  The constant is
-       * specific to the exact executable we use; clearly I am just not
-       * understanding some necessary factor in the relocation.
-       * Until I do, we'll have to hack it.  I calculate the constant by
-       * comparing the address of e.g. 'calloc' with the address we already
-       * have for 'calloc' inside 'libsym'. */
       printf("Relocating by 0x%0lx\n", lmap->l_addr);
-      relocate_symbols(libsym, lmap->l_addr+628543492096);
-      /*relocate_symbols(libsym, 0x7f6d9f849000);*/
-      /*relocate_symbols(libsym, 0x7f6d9fc11000);*/
-      /*relocate_symbols(libsym, lmap->l_addr);*/
+      relocate_symbols(libsym, lmap->l_addr);
       qsort(libsym->bols, libsym->n, sizeof(symbol), symcompar);
       fix_symbols(procsym, libsym);
     }
@@ -849,13 +840,21 @@ main(int argc, char *argv[]) {
 
   /* printsyms(procsym); */
 
+  {
+    const symbol* sympause = find_symbol("pause", procsym);
+    if(sympause != NULL) {
+      printf("%10s@0x%0lx\n", "pause", sympause->address);
+    }
+  }
   const symbol* symmalloc = find_symbol("malloc", procsym);
-  printf("malloc is at 0x%0lx\n   should be 0x7f6d9f8cc470 (0x%0lx)\n",
-         symmalloc->address, symmalloc->address-0x7f6d9f8cc470);
-  printf("malloc2 should be at 0x7f6d9fc27e70\n");
+  if(symmalloc == NULL) {
+    fprintf(stderr, "no malloc.  giving up.\n");
+    ptrace(PTRACE_DETACH, inferior, 0,0);
+    return EXIT_FAILURE;
+  }
+  printf("%10s@0x%012lx\n", "malloc", symmalloc->address);
   const symbol* symfree= find_symbol("free", procsym);
-  printf("free is at 0x%0lx\n should be 0x7f6d9fc21140 (0x%0lx)\n",
-         symfree->address, symfree->address-0x7f6d9fc21140);
+  printf("%10s@0x%012lx\n", "free", symfree->address);
 #if 0
   long word;
   if(read_inferior(&word, 0x7f6d9f8cc470, sizeof(long), inferior)) {
