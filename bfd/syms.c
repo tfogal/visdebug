@@ -36,24 +36,7 @@ static int linux_read_memory(unsigned long from, unsigned char *to, size_t len,
 /* returns >0 on success. */
 static int
 read_inferior(void* buf, uintptr_t base, size_t bytes, pid_t inferior) {
-#if 0
   assert(inferior > 0); /* PID must be valid. */
-  errno = 0;
-  uintptr_t* data = (uintptr_t*)buf;
-  for(size_t i=0; i < bytes / 8; ++i) {
-    data[i*8] = ptrace(PTRACE_PEEKTEXT, inferior, base + (i*8), NULL);
-    if(errno) { return errno; }
-  }
-  /* unless 'bytes' is a multiple of the word size, there's a few bytes left
-   * over.  this relies on integer arithmetic and breaks if the compiler thinks
-   * it's smarter than us.*/
-  const size_t bytes_read = (bytes/8)*8;
-  long word = ptrace(PTRACE_PEEKTEXT, inferior, base + bytes_read, NULL);
-  if(errno) { return errno; }
-  const size_t leftover = bytes - bytes_read;
-  memcpy(data+bytes_read, &word, leftover);
-  return 0;
-#else
   int rv;
   if((rv = linux_read_memory(base, buf, bytes, inferior)) != 0) {
     char errmsg[512];
@@ -64,24 +47,10 @@ read_inferior(void* buf, uintptr_t base, size_t bytes, pid_t inferior) {
     //fprintf(stderr, "error(%d) reading memory: %s\n", errno, errmsg);
   }
   return rv;
-#endif
 }
 
 static bool
 valid_header(const Elf64_Ehdr* ehdr) {
-#if 0
-  printf("program header table is +%ld bytes\n", ehdr->e_phoff);
-  printf("section header table is +%ld bytes\n", ehdr->e_shoff);
-  printf("execution starts at: 0x%0lx\ntype: ", ehdr->e_entry);
-  switch(ehdr->e_type) {
-    case ET_NONE: printf("no type, impossible\n"); break;
-    case ET_REL: puts("relocatable"); break;
-    case ET_EXEC: puts("executable"); break;
-    case ET_DYN: puts("shared object"); break;
-    case ET_CORE: puts("core"); break;
-    default: puts("other object type.."); return false;
-  }
-#endif
   return ehdr->e_ident[0] == 0x7f && ehdr->e_ident[1] == 'E' &&
          ehdr->e_ident[2] == 'L' && ehdr->e_ident[3] == 'F';
 }
@@ -640,26 +609,6 @@ free_lmap(struct link_map* lm) {
   free(lm);
 }
 
-/* Good news!  No longer needed.  We don't hack this badly anymore; now we read
- * the .dynsym and hack it goodly. */
-#if 0
-/* Terrible.  Any symbol whose name includes 'match' gets the given 'offset'
- * added into it.
- * 'sym' is not const by any reasonable definition of "constant", just by C's
- * definition. */
-static void
-relocate_symbols_matching(const symtable_t* sym, const char* match,
-                          const uintptr_t offset) {
-  for(size_t i=0; i < sym->n; ++i) {
-    if(strstr(sym->bols[i].name, match)) {
-      sym->bols[i].address += offset;
-      printf("relocating '%s' to 0x%0lx\n", sym->bols[i].name,
-             sym->bols[i].address);
-    }
-  }
-}
-#endif
-
 /* A symbol filter.  If true, the symbol is allowed to stay. */
 typedef bool(symfilt)(const symbol s, void*);
 /* @return the symbols that pass the function from the list 'sy'.  The symbols
@@ -789,20 +738,6 @@ main(int argc, char *argv[]) {
     }
     printf("Library %zu loaded at 0x%012lx, next at %14p. [%17s]\n", i++,
            lmap->l_addr, lmap->l_next, lmap->l_name);
-#if 0
-    if(lmap->l_addr > 0) {
-      long testword;
-      const uintptr_t srchbase = lmap->l_addr;
-      for(size_t i=0; i < 2147483648; ++i) {
-        if(read_inferior(&testword, srchbase+i*sizeof(long), sizeof(long),
-                         inferior)) {
-          fprintf(stderr, "first unreadable address is: 0x%0lx\n",
-                  srchbase+i*sizeof(long));
-          break;
-        }
-      }
-    }
-#endif
     lmaddr = (uintptr_t)lmap->l_next;
     if(lmap->l_name == 0x0 || lmap->l_name[0] == '\0' ||
        (procfd = open(lmap->l_name, O_RDONLY)) == -1) {
@@ -812,14 +747,6 @@ main(int argc, char *argv[]) {
     symtable_t* sy = read_symtab(procread);
     close(procfd);
     printf("Read %zu symbols from '%s' library.\n", sy->n, lmap->l_name);
-#if 0
-    for(size_t k=0; k < sy->n; ++k) {
-      if(strstr(sy->bols[k].name, "malloc")) {
-        printf("%s at 0x%0lx [%zu] in %s\n", sy->bols[k].name,
-               sy->bols[k].address, k, lmap->l_name);
-      }
-    }
-#endif
     /* But we don't care about most of the symbols.  Drop any of them that the
      * main executable doesn't use. */
     symtable_t* libsym = filter_symbols(sy, already_present, procsym);
@@ -846,15 +773,19 @@ main(int argc, char *argv[]) {
       printf("%10s@0x%0lx\n", "pause", sympause->address);
     }
   }
-  const symbol* symmalloc = find_symbol("malloc", procsym);
-  if(symmalloc == NULL) {
-    fprintf(stderr, "no malloc.  giving up.\n");
-    ptrace(PTRACE_DETACH, inferior, 0,0);
-    return EXIT_FAILURE;
+  {
+    const symbol* symmalloc = find_symbol("malloc", procsym);
+    if(symmalloc == NULL) {
+      fprintf(stderr, "no malloc.  giving up.\n");
+      ptrace(PTRACE_DETACH, inferior, 0,0);
+      return EXIT_FAILURE;
+    }
+    printf("%10s@0x%012lx\n", "malloc", symmalloc->address);
   }
-  printf("%10s@0x%012lx\n", "malloc", symmalloc->address);
-  const symbol* symfree= find_symbol("free", procsym);
-  printf("%10s@0x%012lx\n", "free", symfree->address);
+  {
+    const symbol* symfree= find_symbol("free", procsym);
+    printf("%10s@0x%012lx\n", "free", symfree->address);
+  }
 #if 0
   long word;
   if(read_inferior(&word, 0x7f6d9f8cc470, sizeof(long), inferior)) {
