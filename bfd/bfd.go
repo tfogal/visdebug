@@ -2,6 +2,7 @@ package bfd
 // #include <stdlib.h>
 // #include <bfd.h>
 // #include "wrapbfd.h"
+// #include "syms.h"
 // #cgo CFLAGS: -std=gnu99
 // #cgo LDFLAGS: -lbfd
 import "C"
@@ -193,4 +194,11 @@ func Symbols(bfd *C.bfd) ([]Symbol) {
 
   C.free(unsafe.Pointer(symtab));
   return symbols;
+}
+
+/* reads symbols from the process, properly relocating them to get their actual
+ * address. */
+func SymbolsProcess(pid int) ([]Symbol) {
+  symbols := make([]Symbol, 0);
+  return symbols
 }

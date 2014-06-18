@@ -16,3 +16,7 @@ func TestReadSymbols(t *testing.T) {
     t.Fatalf("symbol reading broken?  only read %d symbols.", len(symbols))
   }
 }
+
+func TestSymbolsProcess(t *testing.T) {
+  SymbolsProcess(42);
+}

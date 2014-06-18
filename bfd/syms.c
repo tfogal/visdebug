@@ -27,6 +27,7 @@
 #include <sys/user.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include "syms.h"
 #include "wrapbfd.h"
 #include "../cfg/compiler.h"
 
@@ -34,7 +35,7 @@ static int linux_read_memory(unsigned long from, unsigned char *to, size_t len,
                              const pid_t pid);
 
 /* returns >0 on success. */
-static int
+int
 read_inferior(void* buf, uintptr_t base, size_t bytes, pid_t inferior) {
   assert(inferior > 0); /* PID must be valid. */
   int rv;
@@ -111,7 +112,7 @@ print_section_headers(const uintptr_t addr, const size_t nhdrs, pid_t pid) {
   }
 }
 
-static uintptr_t
+uintptr_t
 whereami(pid_t inferior) {
   struct user_regs_struct regs;
   if(ptrace(PTRACE_GETREGS, inferior, 0, &regs) != 0) {
@@ -218,32 +219,11 @@ read_process_bfd(const char* fn, pid_t chld) {
   }
 }
 
-static pid_t inferior_pid = 0;
-static void
-handle_signal(int sig) {
-  signal(sig, SIG_DFL);
-  if(inferior_pid) {
-    ptrace(PTRACE_DETACH, inferior_pid, 0,0);
-  }
-  psignal(sig, "sig received in parent, detaching and shutting down");
-  exit(EXIT_FAILURE);
-}
 
-typedef struct _symbol {
-  char* name;
-  uintptr_t address;
-} symbol;
-typedef struct _symtable {
-  size_t n;
-  symbol* bols;
-} symtable_t;
-static void free_symtable(symtable_t* sym);
-
-static int procfd = -1;
-static long procread(void* into, size_t n, size_t offset);
+long procread(void* into, size_t n, size_t offset);
 
 typedef long(rdinf)(void* into, size_t n, size_t offset);
-static symtable_t* read_symtab(rdinf* rd);
+symtable_t* read_symtab(rdinf* rd);
 
 /* Copy LEN bytes from inferior's memory starting at MEMADDR
    to debugger memory starting at MYADDR.  */
@@ -339,7 +319,9 @@ typedef struct _strtable {
  * reading from a /proc file and ptrace PEEKing.  Always returns the number of
  * bytes read. */
 typedef long(rdinf)(void* into, size_t n, size_t offset);
-static long
+static int procfd = -1;
+void setprocfd(int x) { procfd = x; }
+long
 procread(void* into, size_t n, size_t offset) {
   if(procfd == -1) { return -EINVAL; }
   _Static_assert(sizeof(ssize_t) <= sizeof(long), "Might not be valid anyway,"
@@ -348,6 +330,8 @@ procread(void* into, size_t n, size_t offset) {
 }
 /* Reads from the inferior's memory.  The offset is relative: we compensate for
  * the load address of the binary automatically */
+static pid_t inferior_pid = -1;
+void setinferiorpid(pid_t p) { inferior_pid = p; }
 static long
 ptraceread(void* into, size_t n, size_t offset) {
 #ifdef _LP64
@@ -395,7 +379,7 @@ read_strtab(rdinf* rd, const Elf64_Ehdr eh, size_t idx) {
   return strings;
 }
 
-static void
+void
 free_symtable(symtable_t* sym) {
   for(size_t i=0; i < sym->n; ++i) {
     free(sym->bols[i].name);
@@ -406,7 +390,7 @@ free_symtable(symtable_t* sym) {
   free(sym);
 }
 
-static symtable_t*
+symtable_t*
 read_symtab(rdinf* rd) {
   assert(procfd != -1);
 
@@ -507,7 +491,7 @@ printsyms(const symtable_t* sym) {
            sym->bols[i].address);
   }
 }
-static const symbol*
+const symbol*
 find_symbol(const char* name, const symtable_t* sym) {
   for(size_t i=0; i < sym->n; ++i) {
     const int compar = strcmp(sym->bols[i].name, name);
@@ -525,7 +509,7 @@ find_symbol(const char* name, const symtable_t* sym) {
  * we'll just run off the process' address space and get an errno while
  * reading.  The DT_DEBUG leads us to the link_map structure.
  * @param addr_dynamic address of the _DYNAMIC symbol in the inferior. */
-static uintptr_t
+uintptr_t
 lmap_head(pid_t inferior, uintptr_t addr_dynamic) {
   errno=0;
   for(uintptr_t dynaddr=addr_dynamic; errno==0; dynaddr+=sizeof(Elf64_Dyn)) {
@@ -564,7 +548,7 @@ lmap_head(pid_t inferior, uintptr_t addr_dynamic) {
   return 0x0;
 }
 
-MALLOC static struct link_map*
+MALLOC struct link_map*
 load_lmap(pid_t inferior, uintptr_t laddr) {
   struct link_map* rv = calloc(1, sizeof(struct link_map));
   errno=0;
@@ -603,7 +587,7 @@ load_lmap(pid_t inferior, uintptr_t laddr) {
   return rv;
 }
 
-static void
+void
 free_lmap(struct link_map* lm) {
   free(lm->l_name);
   free(lm);
@@ -613,7 +597,7 @@ free_lmap(struct link_map* lm) {
 typedef bool(symfilt)(const symbol s, void*);
 /* @return the symbols that pass the function from the list 'sy'.  The symbols
  * are deep-copied, to allow 'sy' to be freed afterwards. */
-static symtable_t*
+symtable_t*
 filter_symbols(const symtable_t* sy, symfilt* youshallpass, void* user) {
   symtable_t* newsym = calloc(1, sizeof(symtable_t));
   newsym->n = 0;
@@ -627,14 +611,14 @@ filter_symbols(const symtable_t* sy, symfilt* youshallpass, void* user) {
   }
   return newsym;
 }
-static bool
+bool
 already_present(const symbol s, void* existing_table) {
   const symtable_t* existing = (const symtable_t*)existing_table;
   return find_symbol(s.name, existing) != NULL;
 }
 
 /* offsets the symbols by the given base address... if that makes sense. */
-static void
+void
 relocate_symbols(symtable_t* sym, const uintptr_t offset) {
   for(size_t i=0; i < sym->n; ++i) {
     /* There are some 'special' symbols that must NOT be relocated.  SHN_UNDEF
@@ -670,7 +654,7 @@ merge_symtables(const symtable_t* a, const symtable_t* b) {
  * Since *we* are the loader, we need to fix things up.  The second symtable,
  * 'with', should come from the library that actually owns the symbol.  We use
  * that symtable to correct the symbols in 'dest'. */
-static void
+void
 fix_symbols(symtable_t* dest, const symtable_t* with) {
   for(size_t i=0; i < dest->n; ++i) {
     if(dest->bols[i].address == 0x0) {
@@ -681,137 +665,4 @@ fix_symbols(symtable_t* dest, const symtable_t* with) {
       }
     }
   }
-}
-
-int
-main(int argc, char *argv[]) {
-  if(argc != 2) {
-    fprintf(stderr, "need PID to analyze\n");
-    return EXIT_FAILURE;
-  }
-  (void)argv;
-
-  const pid_t inferior = (pid_t)atoi(argv[1]);
-  if(ptrace(PTRACE_ATTACH, inferior, 0,0)) {
-    perror("ptrace attach");
-    ptrace(PTRACE_DETACH, inferior, 0,0);
-    return EXIT_FAILURE;
-  }
-  { /* make sure child loses ATTACHd state if we die. */
-    inferior_pid = inferior;
-    for(size_t i=0; i < _NSIG; ++i) {
-      if(SIGCHLD != i) {
-        signal(i, handle_signal);
-      }
-    }
-  }
-
-  char exe[128];
-  snprintf(exe, 128, "/proc/%ld/exe", (long)inferior);
-  const int fd = open(exe, O_RDONLY);
-  if(fd == -1) {
-    ptrace(PTRACE_DETACH, inferior, 0,0);
-    return EXIT_FAILURE;
-  }
-  procfd = fd;
-  symtable_t* procsym = read_symtab(procread);
-  close(fd);
-  qsort(procsym->bols, procsym->n, sizeof(symbol), symcompar);
-  printf("Read %zu symbols.\n", procsym->n);
-  const symbol* dynamic = find_symbol("_DYNAMIC", procsym);
-  if(dynamic == NULL) {
-    ptrace(PTRACE_DETACH, inferior, 0,0);
-    return EXIT_FAILURE;
-  }
-  
-  const uintptr_t head_lmaddr = lmap_head(inferior, dynamic->address);
-  printf("lmap hd: 0x%0lx\n", head_lmaddr);
-
-  /* now iterate through each link map and load that thing's symbols. */
-  struct link_map* lmap;
-  uintptr_t lmaddr = head_lmaddr;
-  size_t i=0;
-  do {
-    lmap = load_lmap(inferior, lmaddr);
-    if(i==0) {
-      assert(lmap->l_addr == 0x0 && "first lmap should not need relocations!");
-    }
-    printf("Library %zu loaded at 0x%012lx, next at %14p. [%17s]\n", i++,
-           lmap->l_addr, lmap->l_next, lmap->l_name);
-    lmaddr = (uintptr_t)lmap->l_next;
-    if(lmap->l_name == 0x0 || lmap->l_name[0] == '\0' ||
-       (procfd = open(lmap->l_name, O_RDONLY)) == -1) {
-      free_lmap(lmap);
-      continue;
-    }
-    symtable_t* sy = read_symtab(procread);
-    close(procfd);
-    printf("Read %zu symbols from '%s' library.\n", sy->n, lmap->l_name);
-    /* But we don't care about most of the symbols.  Drop any of them that the
-     * main executable doesn't use. */
-    symtable_t* libsym = filter_symbols(sy, already_present, procsym);
-    free_symtable(sy);
-    /* ld-linux-x86-64* has the symbols we need (i.e. libc functions).
-     * libc.so.6 also has these, of course, but I cannot make sense of the
-     * addresses in that file.
-     * So, for now, this suffices. */
-    if(true || strstr(lmap->l_name, "ld-linux-x86-64")) {
-      printf("Relocating by 0x%0lx\n", lmap->l_addr);
-      relocate_symbols(libsym, lmap->l_addr);
-      qsort(libsym->bols, libsym->n, sizeof(symbol), symcompar);
-      fix_symbols(procsym, libsym);
-    }
-    free_symtable(libsym);
-    free_lmap(lmap);
-  } while(lmaddr);
-
-  /* printsyms(procsym); */
-
-  {
-    const symbol* sympause = find_symbol("pause", procsym);
-    if(sympause != NULL) {
-      printf("%10s@0x%0lx\n", "pause", sympause->address);
-    }
-  }
-  {
-    const symbol* symmalloc = find_symbol("malloc", procsym);
-    if(symmalloc == NULL) {
-      fprintf(stderr, "no malloc.  giving up.\n");
-      ptrace(PTRACE_DETACH, inferior, 0,0);
-      return EXIT_FAILURE;
-    }
-    printf("%10s@0x%012lx\n", "malloc", symmalloc->address);
-  }
-  {
-    const symbol* symfree= find_symbol("free", procsym);
-    printf("%10s@0x%012lx\n", "free", symfree->address);
-  }
-#if 0
-  long word;
-  if(read_inferior(&word, 0x7f6d9f8cc470, sizeof(long), inferior)) {
-    fprintf(stderr, "something went wrong reading malloc: %d\n", errno);
-    errno=0;
-    /*word = ptrace(PTRACE_PEEKDATA, inferior, symmalloc->address, 0);*/
-    word = ptrace(PTRACE_PEEKDATA, inferior, 0x7f6d9f8cc470, 0);
-    if(word == -1 && errno != 0) {
-      fprintf(stderr, "could not read malloc, AGAIN: %d\n", errno);
-    }
-  }
-  long brkword = (0xccULL << 56) | (0x00FFFFFFFFFFFFFF & word);
-  if(ptrace(PTRACE_POKEDATA, inferior, symmalloc->address, brkword) == -1) {
-    fprintf(stderr, "inserting breakpoint failed: %d\n", errno);
-  }
-  if(ptrace(PTRACE_CONT, inferior, 0,0)) {
-    fprintf(stderr, "error continuing! %d\n", errno);
-  }
-#endif
-
-  free_symtable(procsym);
-
-  if(ptrace(PTRACE_DETACH, inferior, 0,0)) {
-    perror("detaching");
-    return EXIT_FAILURE;
-  }
-
-  return EXIT_SUCCESS;
 }
