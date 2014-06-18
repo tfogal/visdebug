@@ -1,4 +1,5 @@
 package bfd
+// #include <stdio.h>
 // #include <stdlib.h>
 // #include <bfd.h>
 // #include "wrapbfd.h"
@@ -199,6 +200,9 @@ func Symbols(bfd *C.bfd) ([]Symbol) {
 /* reads symbols from the process, properly relocating them to get their actual
  * address. */
 func SymbolsProcess(pid int) ([]Symbol) {
-  symbols := make([]Symbol, 0);
+  C.setprocfd(42)
+  sym := C.read_symtab_procread()
+  symbols := make([]Symbol, sym.n);
+
   return symbols
 }

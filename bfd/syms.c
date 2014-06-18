@@ -476,6 +476,8 @@ read_symtab(rdinf* rd) {
   }
   return sym;
 }
+/* purely because Cgo is a PITA. */
+symtable_t* read_symtab_procread() { return read_symtab(procread); }
 
 int
 symcompar(const void* a, const void* b) {

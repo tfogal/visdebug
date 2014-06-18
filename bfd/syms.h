@@ -13,6 +13,7 @@ typedef struct _symtable {
 
 typedef long(rdinf)(void* into, size_t n, size_t offset);
 symtable_t* read_symtab(rdinf* rd);
+symtable_t* read_symtab_procread();
 uintptr_t lmap_head(pid_t inferior, uintptr_t addr);
 void setprocfd(int x);
 long procread(void* into, size_t n, size_t offset);
