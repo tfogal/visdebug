@@ -8,7 +8,10 @@ package bfd
 // #cgo LDFLAGS: -lbfd
 import "C"
 import "errors"
+import "fmt"
+import "os"
 import "reflect"
+import "sort"
 import "unsafe"
 
 /* BFD uses these values for defines it reads from. */
@@ -114,6 +117,11 @@ func (s *Symbol) IndirectFunction() (bool) {
 func (s *Symbol) GloballyUnique() (bool) {
   return (s.flags & bfd_BSF_GNU_UNIQUE) > 0;
 }
+/* for sorting the symbols */
+type SymList []Symbol
+func (s SymList) Len() int { return len(s); }
+func (s SymList) Less(i int, j int) bool { return s[i].name < s[j].name }
+func (s SymList) Swap(i int, j int) { s[i], s[j] = s[j], s[i] }
 
 /* Open a BFD file read-only.  Use a target string of "" for a null pointer.
  * Returned memory must eventually be passed to Close. */
@@ -199,10 +207,48 @@ func Symbols(bfd *C.bfd) ([]Symbol) {
 
 /* reads symbols from the process, properly relocating them to get their actual
  * address. */
-func SymbolsProcess(pid int) ([]Symbol) {
-  C.setprocfd(42)
-  sym := C.read_symtab_procread()
-  symbols := make([]Symbol, sym.n);
+func SymbolsProcess(pid int) ([]Symbol, error) {
+  filename := fmt.Sprintf("/proc/%d/exe", pid)
+  file, err := os.Open(filename)
+  if err != nil { return nil, err }
+  defer file.Close()
 
-  return symbols
+  C.setprocfd(C.int(file.Fd()))
+  sym := C.read_symtab_procread()
+  if sym == nil { return nil, errors.New("could not read symbol table") }
+  defer C.free_symtable(sym)
+
+  /* again with the indexing issue, see above. */
+  var gosymtab []C.symbol
+  header := (*reflect.SliceHeader)((unsafe.Pointer(&gosymtab)));
+  header.Cap = int(sym.n);
+  header.Len = int(sym.n);
+  header.Data = uintptr(unsafe.Pointer(sym.bols));
+
+  symbols := make([]Symbol, sym.n);
+  for i:=C.size_t(0); i < sym.n; i++ {
+    symbols[i].name = C.GoString(gosymtab[i].name)
+    symbols[i].addr = uintptr(gosymtab[i].address)
+    symbols[i].flags = 0
+  }
+
+  sort.Sort(SymList(symbols))
+
+  fmt.Printf("read %d symbols.\n", len(symbols))
+  dyidx := sort.Search(len(symbols), func(i int) bool {
+    return symbols[i].name >= "_DYNAMIC"
+  })
+  if dyidx > len(symbols) || symbols[dyidx].name != "_DYNAMIC" {
+    return nil, errors.New("Could not find _DYNAMIC section.")
+  }
+
+  lmap_addr := C.lmap_head(C.pid_t(pid), C.uintptr_t(symbols[dyidx].addr))
+  fmt.Printf("head is at: %v\n", lmap_addr)
+
+/*
+  for i:=0; i < len(symbols); i++ {
+    fmt.Printf("\t%30s 0x%12x\n", symbols[i].name, symbols[i].addr)
+  }
+*/
+  return symbols, nil
 }

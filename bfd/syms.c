@@ -326,6 +326,10 @@ procread(void* into, size_t n, size_t offset) {
   if(procfd == -1) { return -EINVAL; }
   _Static_assert(sizeof(ssize_t) <= sizeof(long), "Might not be valid anyway,"
                  "but cast is definitely broken if long is too small.");
+  errno=0;
+#if 0
+  printf("procread %p [%zu:%zu] from %d\n", into, offset, offset+n, procfd);
+#endif
   return (long)pread(procfd, into, n, offset);
 }
 /* Reads from the inferior's memory.  The offset is relative: we compensate for
@@ -392,11 +396,11 @@ free_symtable(symtable_t* sym) {
 
 symtable_t*
 read_symtab(rdinf* rd) {
-  assert(procfd != -1);
+  if(rd == procread) { assert(procfd != -1); }
 
   Elf64_Ehdr ehdr;
   if(rd(&ehdr, sizeof(Elf64_Ehdr), 0) != (int)sizeof(Elf64_Ehdr)) {
-    fprintf(stderr, "could not read ELF header.\n");
+    fprintf(stderr, "could not read ELF header from %d: %d\n", procfd, errno);
     return NULL;
   }
   fprintf(stderr, "load time address: 0x%0lx\n", ehdr.e_entry);
