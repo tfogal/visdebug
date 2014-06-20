@@ -523,8 +523,8 @@ lmap_head(pid_t inferior, uintptr_t addr_dynamic) {
     /* this 'tag' is the d_tag of an Elf64_Dyn */
     long tag = ptrace(PTRACE_PEEKDATA, inferior, dynaddr, 0);
     if(errno != 0) {
+      fprintf(stderr, "could not read tag from proc %d: %d\n", inferior, errno);
       assert(tag == -1);
-      fprintf(stderr, "could not read tag.\n");
       return 0x0;
     }
     switch(tag) {

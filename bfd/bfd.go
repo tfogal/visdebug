@@ -13,6 +13,7 @@ import "os"
 import "reflect"
 import "sort"
 import "unsafe"
+import "github.com/tfogal/ptrace"
 
 /* BFD uses these values for defines it reads from. */
 const(
@@ -205,10 +206,15 @@ func Symbols(bfd *C.bfd) ([]Symbol) {
   return symbols;
 }
 
+func lmap_head(inferior *ptrace.Tracee, addr uintptr) uintptr {
+  /* todo: clone lmap_head in here. */
+  return 0x0
+}
+
 /* reads symbols from the process, properly relocating them to get their actual
  * address. */
-func SymbolsProcess(pid int) ([]Symbol, error) {
-  filename := fmt.Sprintf("/proc/%d/exe", pid)
+func SymbolsProcess(inferior *ptrace.Tracee) ([]Symbol, error) {
+  filename := fmt.Sprintf("/proc/%d/exe", inferior.PID())
   file, err := os.Open(filename)
   if err != nil { return nil, err }
   defer file.Close()
@@ -242,7 +248,14 @@ func SymbolsProcess(pid int) ([]Symbol, error) {
     return nil, errors.New("Could not find _DYNAMIC section.")
   }
 
-  lmap_addr := C.lmap_head(C.pid_t(pid), C.uintptr_t(symbols[dyidx].addr))
+  fmt.Printf("reading the _DYNAMIC section from 0x%0x\n", symbols[dyidx].addr)
+  word, err := inferior.ReadWord(symbols[dyidx].addr)
+  if err != nil {
+    return nil, err
+  }
+  fmt.Printf("first word: %d\n", word)
+
+  lmap_addr := lmap_head(inferior, symbols[dyidx].addr)
   fmt.Printf("head is at: %v\n", lmap_addr)
 
 /*

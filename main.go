@@ -315,7 +315,7 @@ func commands() (chan Command) {
       s, err := rdr.ReadString('\n')
       if err != nil {
         fmt.Fprintf(os.Stderr, "error scanning line: %v\n", err)
-        cmds <- nil
+        cmds <- nil // signal EOF.
         close(cmds)
         return
       }

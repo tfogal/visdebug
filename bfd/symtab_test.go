@@ -1,8 +1,8 @@
 package bfd
-
 import "os"
 import "syscall"
 import "testing"
+import "github.com/tfogal/ptrace"
 
 func TestReadSymbols(t *testing.T) {
   descriptor, err := OpenR("../testprograms/dimensional", "")
@@ -44,10 +44,24 @@ func startproc(arguments []string, t *testing.T) (*os.Process, error) {
 }
 
 func TestSymbolsProcess(t *testing.T) {
-  inferior, err := startproc([]string{"../testprograms/pauser", "3"}, t)
+  argv := []string{"../testprograms/pauser", "3"}
+  inferior, err := ptrace.Exec(argv[0], argv)
   if err != nil {
-    t.Fatalf("could not start subprocess, bailing.")
+    t.Fatalf("could not start subprocess, bailing: %v", err)
     t.FailNow()
   }
-  SymbolsProcess(inferior.Pid);
+  t.Logf("inferior started with PID %d\n", inferior.PID())
+  /* wait for 1 event, i.e. the notification that the child has exec'd */
+  status := <- inferior.Events()
+  if status == nil {
+    t.Fatalf("no events?")
+    inferior.Close()
+    return
+  }
+  stat := status.(syscall.WaitStatus)
+  if stat.Exited() { t.Log("exited") }
+  if stat.Stopped() { t.Log("stopped") }
+
+  SymbolsProcess(inferior)
+  inferior.SendSignal(syscall.SIGKILL)
 }
