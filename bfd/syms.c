@@ -27,9 +27,14 @@
 #include <sys/user.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include "debug.h"
 #include "syms.h"
 #include "wrapbfd.h"
 #include "../cfg/compiler.h"
+
+DECLARE_CHANNEL(headers);
+DECLARE_CHANNEL(sections);
+DECLARE_CHANNEL(symmeta);
 
 static int linux_read_memory(unsigned long from, unsigned char *to, size_t len,
                              const pid_t pid);
@@ -403,14 +408,14 @@ read_symtab(rdinf* rd) {
     fprintf(stderr, "could not read ELF header from %d: %d\n", procfd, errno);
     return NULL;
   }
-  fprintf(stderr, "load time address: 0x%0lx\n", ehdr.e_entry);
+  TRACE(headers, "load time address: 0x%0lx\n", ehdr.e_entry);
   assert(valid_header(&ehdr));
 
   symtable_t* sym = calloc(1, sizeof(symtable_t));
   sym->n = 0;
 
   const uintptr_t shstart = ehdr.e_shoff;
-  printf("Iterating over %d headers.\n", ehdr.e_shnum);
+  TRACE(sections, "Iterating over %d headers.\n", ehdr.e_shnum);
   const size_t shsz = sizeof(Elf64_Shdr);
   for(size_t i=0; i < ehdr.e_shnum; ++i) {
     Elf64_Shdr shdr;
@@ -419,7 +424,7 @@ read_symtab(rdinf* rd) {
       continue;
     }
     if(shdr.sh_type == SHT_STRTAB) {
-      printf("String table in section %zu.\n", i);
+      TRACE(sections, "String table in section %zu.\n", i);
     }
     if(shdr.sh_type == SHT_SYMTAB) {
       /* -1: we skip the first symbol.  It is always a null symbol, apparently
@@ -454,7 +459,7 @@ read_symtab(rdinf* rd) {
        * so other things can reference 'symbol index 0' to indicate that the
        * symbol is unknown or broken or whatever. */
       const size_t nsyms = (shdr.sh_size / sizeof(Elf64_Sym)) - 1;
-      printf("adding %zu dynsym symbols\n", nsyms);
+      TRACE(symmeta, "adding %zu dynsym symbols\n", nsyms);
       Elf64_Sym* elfsyms = malloc(shdr.sh_size);
       const size_t bytes = shdr.sh_size;
       if(rd(elfsyms, bytes, shdr.sh_offset) != (int)bytes) {
@@ -531,7 +536,7 @@ lmap_head(pid_t inferior, uintptr_t addr_dynamic) {
       assert(tag == -1);
       return 0x0;
     }
-    printf("tag: %ld\n", tag);
+    TRACE(sections, "dyn tag: %ld\n", tag);
     switch(tag) {
       case DT_NULL: errno=ENOENT; break; /* bail out, end of Dyns. */
       case DT_DEBUG: {
