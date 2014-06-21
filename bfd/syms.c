@@ -515,9 +515,12 @@ find_symbol(const char* name, const symtable_t* sym) {
   return NULL;
 }
 
+/* these are needed to make up for Go being annoying and not having any way to
+ * express these ideas. */
 PURE size_t Elf64_Dynsz() { return sizeof(Elf64_Dyn); }
 PURE size_t Elf64_Sxwordsz() { return sizeof(Elf64_Sxword); }
 PURE size_t rmap_offset() { return offsetof(struct r_debug, r_map); }
+PURE uintptr_t uintptr(const void* p) { return (uintptr_t)p; }
 
 /* Somewhere inside the _DYNAMIC section of the inferior's memory, we should
  * find a DT_DEBUG symbol.  If there's no debug info at all, then eventually
@@ -614,7 +617,7 @@ free_lmap(struct link_map* lm) {
 /* A symbol filter.  If true, the symbol is allowed to stay. */
 typedef bool(symfilt)(const symbol s, void*);
 /* @return the symbols that pass the function from the list 'sy'.  The symbols
- * are deep-copied, to allow 'sy' to be freed afterwards. */
+ * are deep-copied. */
 symtable_t*
 filter_symbols(const symtable_t* sy, symfilt* youshallpass, void* user) {
   symtable_t* newsym = calloc(1, sizeof(symtable_t));
@@ -622,7 +625,6 @@ filter_symbols(const symtable_t* sy, symfilt* youshallpass, void* user) {
   newsym->bols = calloc(sy->n, sizeof(symbol));
   for(size_t i=0; i < sy->n; ++i) {
     if(!youshallpass(sy->bols[i],user)) {continue;} /* RIP Gandalf the Grey. */
-    /* strdup: we need/want to deepcopy. */
     newsym->bols[newsym->n].name = strdup(sy->bols[i].name);
     newsym->bols[newsym->n].address = sy->bols[i].address;
     newsym->n++;

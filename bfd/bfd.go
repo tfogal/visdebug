@@ -13,6 +13,7 @@ import "errors"
 import "fmt"
 import "os"
 import "reflect"
+import "strings"
 import "sort"
 import "unsafe"
 import "github.com/tfogal/ptrace"
@@ -245,17 +246,13 @@ func lmap_head(inferior *ptrace.Tracee, addr uintptr) uintptr {
   return 0x0
 }
 
-/* reads symbols from the process, properly relocating them to get their actual
- * address. */
-func SymbolsProcess(inferior *ptrace.Tracee) ([]Symbol, error) {
-  filename := fmt.Sprintf("/proc/%d/exe", inferior.PID())
-  file, err := os.Open(filename)
-  if err != nil { return nil, err }
-  defer file.Close()
-
-  C.setprocfd(C.int(file.Fd()))
+/* reads the symbols using the C function and then converts it into Go types. */
+func read_symbols_file(fp *os.File) ([]Symbol, error) {
+  C.setprocfd(C.int(fp.Fd()))
   sym := C.read_symtab_procread()
-  if sym == nil { return nil, errors.New("could not read symbol table") }
+  if sym == nil {
+    return nil, errors.New("could not read symbol table")
+  }
   defer C.free_symtable(sym)
 
   /* again with the indexing issue, see above. */
@@ -271,8 +268,60 @@ func SymbolsProcess(inferior *ptrace.Tracee) ([]Symbol, error) {
     symbols[i].addr = uintptr(gosymtab[i].address)
     symbols[i].flags = 0
   }
-
   sort.Sort(SymList(symbols))
+
+  return symbols, nil
+}
+
+func relocate_symbols(symbols []Symbol, offset uintptr) {
+  for i, _ := range symbols {
+    /* There are some 'special' symbols that must NOT be relocated.  SHN_UNDEF
+     * and SHN_ABS ones, for example.  I believe SHN_COMMON symbols should not
+     * be relocated either.  However, we did not save the symbol type when we
+     * built the table, so we can't do that filtering here.  We're going to let
+     * it slide, on the basis that our nefarious purposes do not need to fiddle
+     * with such symbols. */
+    symbols[i].addr += offset
+  }
+}
+
+func find_symbol(name string, slist []Symbol) *Symbol {
+  for _, sym := range slist {
+    if sym.name == name {
+      return &sym
+    }
+  }
+  return nil
+}
+
+/* When an executable calls a function in a library, that library symbol
+ * appears in the executable.  Of course, the linker has no idea where that
+ * library symbol will be at runtime, so it gives the symbol an address of 0x0
+ * and expects the loader to fix things up.
+ * Since *we* are the loader, we need to fix things up.  The second symtable,
+ * 'with', should come from the library that actually owns the symbol.  We use
+ * that symtable to correct the symbols in 'dest'. */
+func fix_symbols(dest []Symbol, with []Symbol) {
+  for ds, _ := range dest {
+    if dest[ds].addr == 0x0 {
+      srch := find_symbol(dest[ds].name, with)
+      if srch != nil {
+        dest[ds].addr = srch.addr
+      }
+    }
+  }
+}
+
+/* reads symbols from the process, properly relocating them to get their actual
+ * address. */
+func SymbolsProcess(inferior *ptrace.Tracee) ([]Symbol, error) {
+  filename := fmt.Sprintf("/proc/%d/exe", inferior.PID())
+  file, err := os.Open(filename)
+  if err != nil { return nil, err }
+  defer file.Close()
+
+  symbols, err := read_symbols_file(file)
+  if err != nil { return nil, err }
 
   fmt.Printf("read %d symbols.\n", len(symbols))
   dyidx := sort.Search(len(symbols), func(i int) bool {
@@ -286,10 +335,50 @@ func SymbolsProcess(inferior *ptrace.Tracee) ([]Symbol, error) {
   lmap_addr := lmap_head(inferior, symbols[dyidx].addr)
   fmt.Printf("head is at: 0x%x\n", lmap_addr)
 
-/*
-  for i:=0; i < len(symbols); i++ {
-    fmt.Printf("\t%30s 0x%12x\n", symbols[i].name, symbols[i].addr)
+  for {
+    lmap := C.load_lmap(C.pid_t(inferior.PID()), C.uintptr_t(lmap_addr))
+    defer C.free(unsafe.Pointer(lmap))
+    libname := C.GoString(lmap.l_name)
+    fmt.Printf("Library loaded at 0x%012x, next at %p [%s]\n",
+               lmap.l_addr, lmap.l_next, libname)
+    lmap_addr = uintptr(C.uintptr(unsafe.Pointer(lmap.l_next))) // next round.
+
+    fp, err := os.Open(libname)
+    defer fp.Close()
+    // Open will fail if we have a null filename.
+    if err == nil && strings.Contains(libname, "ld-linux-x86-64") {
+      libsym, err := read_symbols_file(fp)
+      if err != nil { return nil, err }
+      fmt.Printf("relocating %d symbols by 0x%x\n", len(libsym), lmap.l_addr)
+      relocate_symbols(libsym, uintptr(lmap.l_addr))
+      fix_symbols(symbols, libsym)
+    }
+
+    if lmap_addr == 0x0 { break }
   }
-*/
+
+  { sympause := find_symbol("pause", symbols)
+    if sympause != nil {
+      fmt.Printf("%10s@0x%0x\n", "pause", sympause.addr)
+    }
+  }
+  { symmalloc := find_symbol("malloc", symbols)
+    if symmalloc != nil {
+      fmt.Printf("%10s@0x%0x\n", "malloc", symmalloc.addr)
+    }
+  }
+  { symfree := find_symbol("free", symbols)
+    if symfree != nil {
+      fmt.Printf("%10s@0x%0x\n", "free", symfree.addr)
+    }
+  }
+  { symcalloc := find_symbol("calloc", symbols)
+    if symcalloc != nil {
+      fmt.Printf("%10s@0x%0x\n", "calloc", symcalloc.addr)
+    }
+  }
+  /*for i:=0; i < len(symbols); i++ {
+    fmt.Printf("\t%30s 0x%12x\n", symbols[i].name, symbols[i].addr)
+  }*/
   return symbols, nil
 }

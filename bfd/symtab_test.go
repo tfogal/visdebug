@@ -4,7 +4,6 @@ import "io"
 import "os"
 import "syscall"
 import "testing"
-import "time"
 import "github.com/tfogal/ptrace"
 
 func TestReadSymbols(t *testing.T) {

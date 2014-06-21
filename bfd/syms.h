@@ -1,5 +1,6 @@
 #include <stdbool.h>
 #include <stdlib.h>
+#include <link.h>
 #include "../cfg/compiler.h"
 
 typedef struct _symbol {
@@ -33,3 +34,4 @@ void setinferiorpid(pid_t p);
 PURE size_t Elf64_Dynsz();
 PURE size_t Elf64_Sxwordsz();
 PURE size_t rmap_offset();
+PURE uintptr_t uintptr(const void*);
