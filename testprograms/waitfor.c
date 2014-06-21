@@ -1,6 +1,9 @@
+#define _POSIX_C_SOURCE 200809L
 #include <stdlib.h>
 #include <stdio.h>
+#include <signal.h>
 #include <unistd.h>
+#include "badsync.h"
 
 static float* v3darr;
 static size_t dims[3] = {10, 20, 30};
@@ -17,12 +20,20 @@ __attribute__((noinline)) static void smooth3(float* v) {
   }
 }
 
+static void
+handle_signal(int sig) {
+  signal(sig, SIG_DFL);
+  psignal(sig, "sig received.");
+}
+
 int main(int argc, char* argv[]) {
   if(argc < 2) {
     fprintf(stderr, "need arg: which computation to run.\n");
     return EXIT_FAILURE;
   }
-  printf("waiting for signal.\n");
+  signal(SIGUSR1, handle_signal);
+  badsync();
+  printf("Synchronized.  Pausing...\n");
   pause();
   void* justtest;
   if(argc == 42) { dims[0] = 12398; }

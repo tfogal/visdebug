@@ -1,7 +1,10 @@
 package bfd
+import "fmt"
+import "io"
 import "os"
 import "syscall"
 import "testing"
+import "time"
 import "github.com/tfogal/ptrace"
 
 func TestReadSymbols(t *testing.T) {
@@ -43,6 +46,29 @@ func startproc(arguments []string, t *testing.T) (*os.Process, error) {
   return chld, err
 }
 
+// Write a '1' into /tmp/.garbage and then close it.
+// Pause execution until /tmp/.garbage reads '0'.
+func badsync() {
+  const SYNCFILE string = "/tmp/.garbage";
+  fmt.Printf("[Go] Writing 1 into %s\n", SYNCFILE)
+  fp, err := os.OpenFile(SYNCFILE, os.O_RDWR, 0666)
+  if err != nil { panic(err) }
+  _, err = fmt.Fprintf(fp, "%d\n", 1)
+  if err != nil { panic(err) }
+  fp.Close()
+
+  v := uint(42)
+  fmt.Printf("[Go] Waiting for 0 in %s...\n", SYNCFILE)
+  for v != 0 {
+    fp, err = os.Open(SYNCFILE)
+    defer fp.Close()
+    if err != nil { panic(err) }
+    v = 42
+    _, err = fmt.Fscanf(fp, "%d", &v)
+    if err != nil && err != io.EOF { panic(err) }
+  }
+}
+
 func TestSymbolsProcess(t *testing.T) {
   argv := []string{"../testprograms/pauser", "3"}
   inferior, err := ptrace.Exec(argv[0], argv)
@@ -58,9 +84,14 @@ func TestSymbolsProcess(t *testing.T) {
     inferior.Close()
     return
   }
-  stat := status.(syscall.WaitStatus)
-  if stat.Exited() { t.Log("exited") }
-  if stat.Stopped() { t.Log("stopped") }
+  /* let the child run so we can do our synchronization stuff. */
+  inferior.Continue()
+  badsync()
+  /* stop the child now that we're synchronized: we can't read from it if it's
+   * actively running. */
+  if err = inferior.SendSignal(syscall.SIGSTOP) ; err != nil {
+    t.Fatalf("error telling child to stop: %v", err)
+  }
 
   SymbolsProcess(inferior)
   inferior.SendSignal(syscall.SIGKILL)

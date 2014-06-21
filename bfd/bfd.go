@@ -2,11 +2,13 @@ package bfd
 // #include <stdio.h>
 // #include <stdlib.h>
 // #include <bfd.h>
+// #include <elf.h>
 // #include "wrapbfd.h"
 // #include "syms.h"
 // #cgo CFLAGS: -std=gnu99
 // #cgo LDFLAGS: -lbfd
 import "C"
+import "debug/elf"
 import "errors"
 import "fmt"
 import "os"
@@ -206,8 +208,40 @@ func Symbols(bfd *C.bfd) ([]Symbol) {
   return symbols;
 }
 
+/* Somewhere inside the _DYNAMIC section of the inferior's memory, we should
+ * find a DT_DEBUG symbol.  If there's no debug info at all, then eventually
+ * we'll just run off the process' address space and get an errno while
+ * reading.  The DT_DEBUG leads us to the link_map structure.
+ * @param addr address of the _DYNAMIC symbol in the inferior. */
 func lmap_head(inferior *ptrace.Tracee, addr uintptr) uintptr {
-  /* todo: clone lmap_head in here. */
+  for dynaddr:=addr; true; dynaddr += uintptr(C.Elf64_Dynsz()) {
+    tag, err := inferior.ReadWord(dynaddr)
+    if err != nil {
+      fmt.Fprintf(os.Stderr, "could not read word@0x%0x: %v\n", dynaddr, err)
+      panic("could not read dynamic tag from inferior")
+      return 0x0
+    }
+    switch(elf.DynTag(tag)) {
+      case elf.DT_NULL: /* not found! */
+        panic("DT_DEBUG section not found, cannot find link_map")
+        return 0x0
+      case elf.DT_DEBUG: {
+        fmt.Printf("found the debug tag at 0x%0x\n", dynaddr)
+        rdbg, err := inferior.ReadWord(dynaddr+uintptr(C.Elf64_Sxwordsz()))
+        if err != nil { panic(err) }
+        fmt.Printf("r_debug starts at: 0x%x\n", rdbg)
+        /* that gave us the address of the r_debug, but we want the link_map */
+        rmapaddr := uintptr(rdbg) + uintptr(C.rmap_offset())
+        lmap, err := inferior.ReadWord(rmapaddr)
+        if err != nil {
+          fmt.Fprintf(os.Stderr, "deref link_map (0x%x) failed: %v\n",
+                      rmapaddr, err)
+          panic("grabbing link_map")
+        }
+        return uintptr(lmap)
+      }
+    }
+  }
   return 0x0
 }
 
@@ -249,14 +283,8 @@ func SymbolsProcess(inferior *ptrace.Tracee) ([]Symbol, error) {
   }
 
   fmt.Printf("reading the _DYNAMIC section from 0x%0x\n", symbols[dyidx].addr)
-  word, err := inferior.ReadWord(symbols[dyidx].addr)
-  if err != nil {
-    return nil, err
-  }
-  fmt.Printf("first word: %d\n", word)
-
   lmap_addr := lmap_head(inferior, symbols[dyidx].addr)
-  fmt.Printf("head is at: %v\n", lmap_addr)
+  fmt.Printf("head is at: 0x%x\n", lmap_addr)
 
 /*
   for i:=0; i < len(symbols); i++ {

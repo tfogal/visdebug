@@ -1,7 +1,8 @@
 F95=gfortran
-CFLAGS:=-std=c99 -Wall -Wextra -ggdb3 -O3 -fPIC
+CFLAGS:=-std=c99 -Wall -Wextra -ggdb3 -fPIC
 FFLAGS:=-Wall -Wextra -ggdb3
-obj:=3dloop.o vardim.o switch.o bcont.o nested.o loops.o waitfor.o tiny.o use.o
+obj:=3dloop.o badsync.o vardim.o switch.o bcont.o nested.o loops.o waitfor.o \
+  tiny.o use.o
 all: $(obj) 3dloop dimensional branching contbreak nest forloops pauser
 
 3dloop: 3dloop.o
@@ -22,7 +23,7 @@ nest: nested.o
 forloops: loops.o
 	$(F95) $(FFLAGS) $^ -o $@ $(LDLIBS)
 
-pauser: waitfor.o
+pauser: badsync.o waitfor.o
 	$(CC) $(CFLAGS) $^ -o $@ $(LDLIBS)
 
 small: use.o libtiny.so

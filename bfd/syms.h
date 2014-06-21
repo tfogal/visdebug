@@ -30,3 +30,6 @@ typedef bool(symfilt)(const symbol s, void*);
 symtable_t* filter_symbols(const symtable_t* sy, symfilt*, void* user);
 void free_lmap(struct link_map* lm);
 void setinferiorpid(pid_t p);
+PURE size_t Elf64_Dynsz();
+PURE size_t Elf64_Sxwordsz();
+PURE size_t rmap_offset();

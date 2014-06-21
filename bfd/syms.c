@@ -510,6 +510,10 @@ find_symbol(const char* name, const symtable_t* sym) {
   return NULL;
 }
 
+PURE size_t Elf64_Dynsz() { return sizeof(Elf64_Dyn); }
+PURE size_t Elf64_Sxwordsz() { return sizeof(Elf64_Sxword); }
+PURE size_t rmap_offset() { return offsetof(struct r_debug, r_map); }
+
 /* Somewhere inside the _DYNAMIC section of the inferior's memory, we should
  * find a DT_DEBUG symbol.  If there's no debug info at all, then eventually
  * we'll just run off the process' address space and get an errno while
@@ -527,10 +531,12 @@ lmap_head(pid_t inferior, uintptr_t addr_dynamic) {
       assert(tag == -1);
       return 0x0;
     }
+    printf("tag: %ld\n", tag);
     switch(tag) {
       case DT_NULL: errno=ENOENT; break; /* bail out, end of Dyns. */
       case DT_DEBUG: {
-        printf("found the debug tag at address 0x%0lx\n", dynaddr);
+        printf("found the debug tag at address 0x%0lx, 0x%0lx\n", dynaddr,
+               dynaddr+sizeof(Elf64_Sxword));
         /* at tag +1 word, we find the pointer to the r_debug struct. */
         errno=0;
         const long rdbg = ptrace(PTRACE_PEEKDATA, inferior,
@@ -539,6 +545,7 @@ lmap_head(pid_t inferior, uintptr_t addr_dynamic) {
           fprintf(stderr, "ptrace r_debug base read err: %d\n", errno);
           return 0x0;
         }
+        printf("rdebug at 0x%0lx\n", rdbg);
         /* we can read the r_debug now, but we want the link map. */
         const uintptr_t lmapaddr = rdbg + offsetof(struct r_debug, r_map);
         /* now we have the address of r_map, but we want r_map itself. */
