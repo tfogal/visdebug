@@ -33,23 +33,31 @@ int main(int argc, char* argv[]) {
   }
   signal(SIGUSR1, handle_signal);
   badsync();
-  printf("Synchronized.  Pausing...\n");
-  pause();
+#if 0
+  printf("[ c] Synchronized.  Now another synchronization...\n");
+  badsync();
+  printf("[ c] Second synchro complete.  Running program...\n");
+#else
+  printf("[ c] Synchronized. Moving on...\n");
+#endif
   void* justtest;
   if(argc == 42) { dims[0] = 12398; }
   for(size_t i=1; i < (size_t)argc; ++i) {
     if(atoi(argv[i]) == 3) {
       v3darr = calloc(dims[0]*dims[1]*dims[2], sizeof(float));
+      printf("[ c] back from calloc.\n");
       smooth3(v3darr);
       free(v3darr);
+      printf("[ c] will malloc 42\n");
       justtest = malloc(42);
+      printf("[ c] back from malloc.\n");
     } else {
-      fprintf(stderr, "unknown computational id '%s'\n", argv[i]);
+      fprintf(stderr, "[ c] unknown computational id '%s'\n", argv[i]);
       return EXIT_FAILURE;
     }
   }
   free(justtest);
-  printf("%s finished.\n", argv[0]);
+  printf("[ c] %s finished.\n", argv[0]);
 
   return EXIT_SUCCESS;
 }

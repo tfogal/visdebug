@@ -116,7 +116,7 @@ main(int argc, char *argv[]) {
      * addresses in that file.
      * So, for now, this suffices. */
     if(true || strstr(lmap->l_name, "ld-linux-x86-64")) {
-      printf("Relocating by 0x%0lx\n", lmap->l_addr);
+      printf("Relocating %zu symbols by 0x%0lx\n", libsym->n, lmap->l_addr);
       relocate_symbols(libsym, lmap->l_addr);
       qsort(libsym->bols, libsym->n, sizeof(symbol), symcompar);
       fix_symbols(procsym, libsym);
@@ -127,8 +127,7 @@ main(int argc, char *argv[]) {
 
   /* printsyms(procsym); */
 
-  {
-    const symbol* sympause = find_symbol("pause", procsym);
+  { const symbol* sympause = find_symbol("pause", procsym);
     if(sympause != NULL) {
       printf("%10s@0x%0lx\n", "pause", sympause->address);
     }
@@ -140,9 +139,11 @@ main(int argc, char *argv[]) {
       return EXIT_FAILURE;
     }
     printf("%10s@0x%012lx\n", "malloc", symmalloc->address);
-  {
-    const symbol* symfree= find_symbol("free", procsym);
+  { const symbol* symfree= find_symbol("free", procsym);
     printf("%10s@0x%012lx\n", "free", symfree->address);
+  }
+  { const symbol* symcalloc = find_symbol("calloc", procsym);
+    printf("%10s@0x%012lx\n", "calloc", symcalloc->address);
   }
 #if 1
   long word;

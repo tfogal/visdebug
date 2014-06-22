@@ -1,6 +1,6 @@
 F95=gfortran
 CFLAGS:=-std=c99 -Wall -Wextra -ggdb3 -fPIC
-FFLAGS:=-Wall -Wextra -ggdb3
+FFLAGS:=-Wall -Wextra -ggdb3 -fPIC
 obj:=3dloop.o badsync.o vardim.o switch.o bcont.o nested.o loops.o waitfor.o \
   tiny.o use.o
 all: $(obj) 3dloop dimensional branching contbreak nest forloops pauser

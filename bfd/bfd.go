@@ -11,9 +11,9 @@ import "C"
 import "debug/elf"
 import "errors"
 import "fmt"
+import "io/ioutil"
 import "os"
 import "reflect"
-import "strings"
 import "sort"
 import "unsafe"
 import "github.com/tfogal/ptrace"
@@ -209,6 +209,9 @@ func Symbols(bfd *C.bfd) ([]Symbol) {
   return symbols;
 }
 
+//var strm = os.Stdout
+var strm = ioutil.Discard
+
 /* Somewhere inside the _DYNAMIC section of the inferior's memory, we should
  * find a DT_DEBUG symbol.  If there's no debug info at all, then eventually
  * we'll just run off the process' address space and get an errno while
@@ -227,10 +230,10 @@ func lmap_head(inferior *ptrace.Tracee, addr uintptr) uintptr {
         panic("DT_DEBUG section not found, cannot find link_map")
         return 0x0
       case elf.DT_DEBUG: {
-        fmt.Printf("found the debug tag at 0x%0x\n", dynaddr)
+        fmt.Fprintf(strm, "found the debug tag at 0x%0x\n", dynaddr)
         rdbg, err := inferior.ReadWord(dynaddr+uintptr(C.Elf64_Sxwordsz()))
         if err != nil { panic(err) }
-        fmt.Printf("r_debug starts at: 0x%x\n", rdbg)
+        fmt.Fprintf(strm, "r_debug starts at: 0x%x\n", rdbg)
         /* that gave us the address of the r_debug, but we want the link_map */
         rmapaddr := uintptr(rdbg) + uintptr(C.rmap_offset())
         lmap, err := inferior.ReadWord(rmapaddr)
@@ -312,6 +315,16 @@ func fix_symbols(dest []Symbol, with []Symbol) {
   }
 }
 
+func filter_symbols(sy []Symbol, existing []Symbol) []Symbol {
+  var rv []Symbol
+  for _, s := range sy {
+    if find_symbol(s.name, existing) != nil {
+      rv = append(rv, s)
+    }
+  }
+  return rv
+}
+
 /* reads symbols from the process, properly relocating them to get their actual
  * address. */
 func SymbolsProcess(inferior *ptrace.Tracee) ([]Symbol, error) {
@@ -323,7 +336,7 @@ func SymbolsProcess(inferior *ptrace.Tracee) ([]Symbol, error) {
   symbols, err := read_symbols_file(file)
   if err != nil { return nil, err }
 
-  fmt.Printf("read %d symbols.\n", len(symbols))
+  fmt.Fprintf(strm, "read %d symbols.\n", len(symbols))
   dyidx := sort.Search(len(symbols), func(i int) bool {
     return symbols[i].name >= "_DYNAMIC"
   })
@@ -331,50 +344,52 @@ func SymbolsProcess(inferior *ptrace.Tracee) ([]Symbol, error) {
     return nil, errors.New("Could not find _DYNAMIC section.")
   }
 
-  fmt.Printf("reading the _DYNAMIC section from 0x%0x\n", symbols[dyidx].addr)
+  fmt.Fprintf(strm, "reading _DYNAMIC section from 0x%x\n", symbols[dyidx].addr)
   lmap_addr := lmap_head(inferior, symbols[dyidx].addr)
-  fmt.Printf("head is at: 0x%x\n", lmap_addr)
+  fmt.Fprintf(strm, "head is at: 0x%x\n", lmap_addr)
 
   for {
     lmap := C.load_lmap(C.pid_t(inferior.PID()), C.uintptr_t(lmap_addr))
     defer C.free(unsafe.Pointer(lmap))
     libname := C.GoString(lmap.l_name)
-    fmt.Printf("Library loaded at 0x%012x, next at %p [%s]\n",
-               lmap.l_addr, lmap.l_next, libname)
+    fmt.Fprintf(strm, "Library loaded at 0x%012x, next at %p [%s]\n",
+                lmap.l_addr, lmap.l_next, libname)
     lmap_addr = uintptr(C.uintptr(unsafe.Pointer(lmap.l_next))) // next round.
 
     fp, err := os.Open(libname)
+    // skip the 'in memory image only' kind of library.
+    if libname == "" || err != nil { continue }
     defer fp.Close()
-    // Open will fail if we have a null filename.
-    if err == nil && strings.Contains(libname, "ld-linux-x86-64") {
-      libsym, err := read_symbols_file(fp)
-      if err != nil { return nil, err }
-      fmt.Printf("relocating %d symbols by 0x%x\n", len(libsym), lmap.l_addr)
-      relocate_symbols(libsym, uintptr(lmap.l_addr))
-      fix_symbols(symbols, libsym)
-    }
+    sy, err := read_symbols_file(fp)
+    if err != nil { panic(err) }
+    libsym := filter_symbols(sy, symbols) // drop symbols we don't care about
+    fmt.Fprintf(strm, "Read %d symbols from %s, relocating %d by 0x%x\n",
+                len(sy), libname, len(libsym), lmap.l_addr)
+
+    relocate_symbols(libsym, uintptr(lmap.l_addr))
+    fix_symbols(symbols, libsym)
 
     if lmap_addr == 0x0 { break }
   }
 
   { sympause := find_symbol("pause", symbols)
     if sympause != nil {
-      fmt.Printf("%10s@0x%0x\n", "pause", sympause.addr)
+      fmt.Fprintf(strm, "%10s@0x%0x\n", "pause", sympause.addr)
     }
   }
   { symmalloc := find_symbol("malloc", symbols)
     if symmalloc != nil {
-      fmt.Printf("%10s@0x%0x\n", "malloc", symmalloc.addr)
+      fmt.Fprintf(strm, "%10s@0x%0x\n", "malloc", symmalloc.addr)
     }
   }
   { symfree := find_symbol("free", symbols)
     if symfree != nil {
-      fmt.Printf("%10s@0x%0x\n", "free", symfree.addr)
+      fmt.Fprintf(strm, "%10s@0x%0x\n", "free", symfree.addr)
     }
   }
   { symcalloc := find_symbol("calloc", symbols)
     if symcalloc != nil {
-      fmt.Printf("%10s@0x%0x\n", "calloc", symcalloc.addr)
+      fmt.Fprintf(strm, "%10s@0x%0x\n", "calloc", symcalloc.addr)
     }
   }
   /*for i:=0; i < len(symbols); i++ {
