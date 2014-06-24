@@ -50,7 +50,7 @@ int main(int argc, char* argv[]) {
       free(v3darr);
       printf("[ c] will malloc 42\n");
       justtest = malloc(42);
-      printf("[ c] back from malloc.\n");
+      printf("[ c] back from malloc, got addr %p\n", justtest);
     } else {
       fprintf(stderr, "[ c] unknown computational id '%s'\n", argv[i]);
       return EXIT_FAILURE;

@@ -211,16 +211,24 @@ func TestMallocInterrupt(t *testing.T) {
   if !ws.Stopped() || ws.StopSignal() != 5 {
     t.Fatalf("we expected to hit a breakpoint, but did not.")
   }
+  fmt.Printf("hit the breakpoint! good.\n")
 
   // restore the instruction.
   err = inferior.WriteWord(symmalloc.Address(), minsn)
   if err != nil { t.Fatalf("could not restore insn: %v\n", err) }
 
-  // the CPU now *passed* that instruction, so we need to knock the instruction
-  // pointer back a notch for it run properly.
-  // ... or just kill it...
-  inferior.SendSignal(syscall.SIGTERM)
+  // the CPU now *passed* that instruction, so we need to knock the
+  // instruction pointer back a notch for it to run properly.
+  iptr, err := inferior.GetIPtr()
+  if err != nil { t.Fatalf("could not get insn ptr: %v\n", err) }
 
-  // let the program finish.
-  //inferior.Continue()
+  // ... actually, this should be minus the size of the last instruction!
+  err = inferior.SetIPtr(iptr - 8)
+  if err != nil { t.Fatalf("could not set insn pointer: %v\n", err) }
+
+  err = inferior.Continue()
+  if err != nil { t.Fatalf("continuing failed: %v\n", err) }
+
+  status = <- inferior.Events()
+  procstate(inferior.PID(), status.(syscall.WaitStatus))
 }
