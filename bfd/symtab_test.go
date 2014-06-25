@@ -197,9 +197,10 @@ func TestMallocInterrupt(t *testing.T) {
   if minsn != 0xec834853fd894855 {
     t.Fatalf("malloc call shellcode is unexpected: 0x%x\n", minsn)
   }
+  bp := (minsn & 0xffffffffffffff00) | 0xcc
 
   // overwrite with breakpoint (0xcc)
-  err = inferior.WriteWord(symmalloc.Address(), 0xCCccCCccCCccCCcc)
+  err = inferior.WriteWord(symmalloc.Address(), bp)
   if err != nil { t.Fatalf("%v\n", err) }
 
   // let the child continue.
@@ -223,7 +224,7 @@ func TestMallocInterrupt(t *testing.T) {
   if err != nil { t.Fatalf("could not get insn ptr: %v\n", err) }
 
   // ... actually, this should be minus the size of the last instruction!
-  err = inferior.SetIPtr(iptr - 8)
+  err = inferior.SetIPtr(iptr - 1)
   if err != nil { t.Fatalf("could not set insn pointer: %v\n", err) }
 
   err = inferior.Continue()
