@@ -5,6 +5,7 @@ import(
   "errors"
   "flag"
   "fmt"
+  "io"
   "os"
   "strings"
   "syscall"
@@ -161,17 +162,16 @@ find_helper(node *cfg.Node, seen map[uintptr]bool, name string) (*cfg.Node) {
   return nil
 }
 
-var program string
 var symlist bool
 var execute bool
 var dotcfg bool
+var showmallocs bool
 func init() {
-  flag.StringVar(&program, "exec", "", "program to analyze/work with")
-  flag.StringVar(&program, "e", "", "program to analyze/work with")
   flag.BoolVar(&symlist, "symbols", false, "print out the symbol table")
   flag.BoolVar(&symlist, "s", false, "print out the symbol table")
   flag.BoolVar(&execute, "x", false, "execute subprogram")
   flag.BoolVar(&dotcfg, "cfg", false, "compute and print CFG")
+  flag.BoolVar(&showmallocs, "mallocs", false, "print a line per malloc")
 }
 
 func basename(s string) (string) {
@@ -183,34 +183,32 @@ func basename(s string) (string) {
 
 func main() {
   flag.Parse()
-  if program == "" && flag.NArg() == 0 {
+  if flag.NArg() == 0 {
     fmt.Fprintf(os.Stderr, "No program given!\n")
     return
   }
-  if program == "" { program = flag.Arg(0) }
+  argv := flag.Args()
+  if len(argv) == 1 { panic("no arguments?") }
 
   if symlist {
-    readsymbols(program);
+    readsymbols(argv[0]);
   }
 
   if(dotcfg) {
-    graph := cfg.CFG(program)
+    graph := cfg.CFG(argv[0])
     root := findNodeByName(graph, "main")
     assert(root != nil)
     cfg.Dominance(root)
-    fmt.Printf("digraph %s {\n", basename(program))
+    fmt.Printf("digraph %s {\n", basename(argv[0]))
     inorder(graph, dotNode)
     fmt.Println("}");
   }
 
-  // create a proper argv array that can be passed to exec(2)
-  argv := make([]string, 1)
-  argv[0] = program
-  argv = append(argv, flag.Args()...)
-  if len(argv) == 1 { argv = append(argv, argv[0]) }
-
   if execute {
     instrument(argv)
+  }
+  if showmallocs {
+    mallocs(argv)
   }
 }
 
@@ -360,4 +358,153 @@ func instrument(argv []string) {
         cmds <- nil // signal that receiver can output && read next command
     }
   }
+}
+
+// Write a '1' into /tmp/.garbage and then close it.
+// Pause execution until /tmp/.garbage reads '0'.
+func badsync() {
+  const SYNCFILE string = "/tmp/.garbage";
+  fmt.Printf("[Go] Writing 1 into %s\n", SYNCFILE)
+  fp, err := os.OpenFile(SYNCFILE, os.O_RDWR | os.O_CREATE | os.O_TRUNC, 0666)
+  if err != nil { panic(err) }
+  _, err = fmt.Fprintf(fp, "%d\n", 1)
+  if err != nil { panic(err) }
+  fp.Close()
+
+  v := uint(42)
+  fmt.Printf("[Go] Waiting for 0 in %s...\n", SYNCFILE)
+  for v != 0 {
+    fp, err = os.Open(SYNCFILE)
+    if err != nil { fp.Close(); panic(err) }
+    v = 42
+    _, err = fmt.Fscanf(fp, "%d", &v)
+    if err != nil && err != io.EOF { fp.Close(); panic(err) }
+    fp.Close()
+  }
+  if err = os.Remove(SYNCFILE) ; err != nil {
+    fmt.Fprintf(os.Stderr, "[Go] error removing %s! %v\n", SYNCFILE, err)
+  }
+}
+
+func symbol(symname string, symbols []bfd.Symbol) *bfd.Symbol {
+  for _, sym := range symbols {
+    if sym.Name() == symname {
+      return &sym
+    }
+  }
+  return nil
+}
+
+func whereis(inferior *ptrace.Tracee) uintptr {
+  iptr, err := inferior.GetIPtr()
+  if err != nil { panic(fmt.Errorf("get insn ptr failed: %v\n", err)) }
+
+  return iptr
+}
+
+func wait_for_breakpoint(inferior *ptrace.Tracee, address uintptr) error {
+  // we only need to change one byte, but we need to write a word.  thus we'll
+  // need to read the whole word and replace just the byte we care about.
+  insn, err := inferior.ReadWord(address)
+  if err != nil { return err }
+  const imask = 0xffffffffffffff00
+  bp := (insn & imask) | 0xcc // 0xcc is "the" breakpoint opcode.
+
+  // overwrite with breakpoint (0xcc)
+  err = inferior.WriteWord(address, bp)
+  if err != nil { return err }
+
+  // if you love something, set it free ...
+  if err = inferior.Continue() ; err != nil {
+    return fmt.Errorf("child could not continue: %v", err)
+  }
+
+  stat := <- inferior.Events() // ... it will come back, if meant to be.
+  status := stat.(syscall.WaitStatus)
+  if status.Exited() { return io.EOF }
+
+  // restore the correct instruction ...
+  newinsn, err := inferior.ReadWord(address)
+  if err != nil { return err }
+
+  err = inferior.WriteWord(address, (newinsn & imask) | (insn & 0xFF))
+  if err != nil { return fmt.Errorf("could not restore insn: %v\n", err) }
+
+  // ... back up the instruction pointer, and ...
+  iptr, err := inferior.GetIPtr()
+  if err != nil { return fmt.Errorf("could not get insn ptr: %v\n", err) }
+  err = inferior.SetIPtr(iptr - 1)
+  if err != nil { return fmt.Errorf("could not set insn pointer: %v\n", err) }
+
+  // ... execute the 'call'.
+  if err = inferior.SingleStep() ; err != nil {
+    return fmt.Errorf("could not step through call: %v", err)
+  }
+
+  stat = <- inferior.Events() // eat the trap we get from single stepping
+  status = stat.(syscall.WaitStatus)
+  if status.Exited() { fmt.Printf("ch exited\n") }
+  if status.Signaled() { fmt.Printf("ch was signaled\n") }
+  if status.Continued() { fmt.Printf("ch was continued\n") }
+  if status.Stopped() { fmt.Printf("ch stopped: %v\n", status.StopSignal()) }
+  if !status.Stopped() || status.StopSignal() != syscall.SIGTRAP {
+    return fmt.Errorf("expecting sigtrap, got %d instead!", status)
+  }
+/*
+  if err = inferior.SingleStep() ; err != nil {
+    return fmt.Errorf("could not step through call: %v", err)
+  }
+  stat = <- inferior.Events() // eat the trap we get from single stepping
+*/
+
+  return nil
+}
+
+func mallocs(argv []string) {
+  inferior, err := ptrace.Exec(argv[0], argv)
+  if err != nil {
+    panic(fmt.Errorf("could not start program: %v", err))
+  }
+
+  <- inferior.Events() // eat initial 'process is starting' notification.
+  if err = inferior.Continue() ; err != nil {
+    panic(fmt.Errorf("error letting inferior start: %v", err))
+  }
+  badsync()
+  if err = inferior.SendSignal(syscall.SIGSTOP) ; err != nil {
+    panic(fmt.Errorf("could not stop inferior: %v\n", err))
+  }
+  stat := <- inferior.Events() // eat notification that inferior got SIGSTOP
+  status := stat.(syscall.WaitStatus)
+  if !status.Stopped() {
+    fmt.Printf("expected stop! program probably ended too quickly.\n")
+    inferior.Close()
+    return
+  }
+
+  symbols, err := bfd.SymbolsProcess(inferior)
+  if err != nil {
+    panic(fmt.Errorf("could not read inferior's symbols: %v\n", err))
+  }
+  symmalloc := symbol("malloc", symbols)
+  if symmalloc == nil { panic("no malloc?!") }
+
+  for {
+    err = wait_for_breakpoint(inferior, symmalloc.Address())
+    if err == io.EOF {
+      break
+    } else if err != nil {
+      panic(err)
+    }
+    fmt.Printf("saw a malloc...\n")
+    // A malloc call is a 5 byte instruction.  So break when we're back.
+    err = wait_for_breakpoint(inferior, symmalloc.Address()+5)
+    if err == io.EOF {
+      break
+    } else if err != nil {
+      panic(err)
+    }
+    fmt.Printf("BACK from malloc.\n")
+  }
+  inferior.Close()
 }

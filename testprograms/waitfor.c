@@ -31,6 +31,9 @@ int main(int argc, char* argv[]) {
     fprintf(stderr, "need arg: which computation to run.\n");
     return EXIT_FAILURE;
   }
+  for(size_t i=0; i < (size_t)argc; i++) {
+    printf("arg[%zu]: %s\n", i, argv[i]);
+  }
   signal(SIGUSR1, handle_signal);
   badsync();
 #if 0
@@ -48,14 +51,20 @@ int main(int argc, char* argv[]) {
       printf("[ c] back from calloc.\n");
       smooth3(v3darr);
       free(v3darr);
-      printf("[ c] will malloc 42\n");
+      printf("[ c] will malloc 42\n"); fflush(stdout);
       justtest = malloc(42);
       printf("[ c] back from malloc, got addr %p\n", justtest);
+      free(justtest);
     } else {
       fprintf(stderr, "[ c] unknown computational id '%s'\n", argv[i]);
-      return EXIT_FAILURE;
+      //return EXIT_FAILURE;
     }
   }
+  justtest = malloc(19);
+  printf("[ c] second malloc gave: %p\n", justtest);
+  free(justtest);
+  justtest = malloc(7);
+  printf("[ c] THIRD malloc gave: %p\n", justtest);
   free(justtest);
   printf("[ c] %s finished.\n", argv[0]);
 
