@@ -360,30 +360,33 @@ func instrument(argv []string) {
   }
 }
 
-// Write a '1' into /tmp/.garbage and then close it.
-// Pause execution until /tmp/.garbage reads '0'.
-func badsync() {
-  const SYNCFILE string = "/tmp/.garbage";
+const SYNCFILE string = "/tmp/.garbage";
+func wait_for_0() {
+  v := uint(42)
+  fmt.Printf("[Go] Waiting for 0 in %s...\n", SYNCFILE)
+  for v != 0 {
+    fp, err := os.Open(SYNCFILE)
+    if err != nil { fp.Close(); continue; }
+    v = 42
+    _, err = fmt.Fscanf(fp, "%d", &v)
+    if err != nil && err != io.EOF { fp.Close(); panic(err) }
+    fp.Close()
+  }
+  fmt.Printf("[Go] got the 0, moving on..\n")
+}
+func write_1() {
   fmt.Printf("[Go] Writing 1 into %s\n", SYNCFILE)
   fp, err := os.OpenFile(SYNCFILE, os.O_RDWR | os.O_CREATE | os.O_TRUNC, 0666)
   if err != nil { panic(err) }
   _, err = fmt.Fprintf(fp, "%d\n", 1)
   if err != nil { panic(err) }
   fp.Close()
-
-  v := uint(42)
-  fmt.Printf("[Go] Waiting for 0 in %s...\n", SYNCFILE)
-  for v != 0 {
-    fp, err = os.Open(SYNCFILE)
-    if err != nil { fp.Close(); panic(err) }
-    v = 42
-    _, err = fmt.Fscanf(fp, "%d", &v)
-    if err != nil && err != io.EOF { fp.Close(); panic(err) }
-    fp.Close()
-  }
-  if err = os.Remove(SYNCFILE) ; err != nil {
-    fmt.Fprintf(os.Stderr, "[Go] error removing %s! %v\n", SYNCFILE, err)
-  }
+}
+// Write a '1' into /tmp/.garbage and then close it.
+// Pause execution until /tmp/.garbage reads '0'.
+func badsync() {
+  wait_for_0()
+  write_1()
 }
 
 func symbol(symname string, symbols []bfd.Symbol) *bfd.Symbol {
@@ -464,10 +467,13 @@ func mallocs(argv []string) {
   }
 
   <- inferior.Events() // eat initial 'process is starting' notification.
+  if err = os.Remove(SYNCFILE) ; err != nil {
+    fmt.Fprintf(os.Stderr, "[Go] error removing %s! %v\n", SYNCFILE, err)
+  }
   if err = inferior.Continue() ; err != nil {
     panic(fmt.Errorf("error letting inferior start: %v", err))
   }
-  badsync()
+  wait_for_0()
   if err = inferior.SendSignal(syscall.SIGSTOP) ; err != nil {
     panic(fmt.Errorf("could not stop inferior: %v\n", err))
   }
@@ -478,6 +484,8 @@ func mallocs(argv []string) {
     inferior.Close()
     return
   }
+  // now that it's stopped, write the stuff that says it can run, for later.
+  write_1()
 
   symbols, err := bfd.SymbolsProcess(inferior)
   if err != nil {
@@ -491,7 +499,7 @@ func mallocs(argv []string) {
     if err == io.EOF {
       break
     } else if err != nil {
-      fmt.Fprintf(os.Stderr, "application exited abornally, giving up.\n")
+      fmt.Fprintf(os.Stderr, "application exited abnormally, giving up.\n")
       break;
     }
     fmt.Printf("[go] application malloc'd.\n")

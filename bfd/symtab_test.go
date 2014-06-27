@@ -45,28 +45,35 @@ func startproc(arguments []string, t *testing.T) (*os.Process, error) {
   return chld, err
 }
 
-// Write a '1' into /tmp/.garbage and then close it.
-// Pause execution until /tmp/.garbage reads '0'.
-func badsync() {
-  const SYNCFILE string = "/tmp/.garbage";
+const SYNCFILE string = "/tmp/.garbage";
+func wait_for_0() {
+  v := uint(42)
+  fmt.Printf("[Go] Waiting for 0 in %s...\n", SYNCFILE)
+  for v != 0 {
+    fp, err := os.Open(SYNCFILE)
+    if err != nil { fp.Close(); continue }
+    v = 42
+    _, err = fmt.Fscanf(fp, "%d", &v)
+    if err != nil && err != io.EOF { fp.Close(); panic(err) }
+    fp.Close()
+  }
+}
+func write_1() {
   fmt.Printf("[Go] Writing 1 into %s\n", SYNCFILE)
   fp, err := os.OpenFile(SYNCFILE, os.O_RDWR | os.O_CREATE | os.O_TRUNC, 0666)
   if err != nil { panic(err) }
   _, err = fmt.Fprintf(fp, "%d\n", 1)
   if err != nil { panic(err) }
   fp.Close()
-
-  v := uint(42)
-  fmt.Printf("[Go] Waiting for 0 in %s...\n", SYNCFILE)
-  for v != 0 {
-    fp, err = os.Open(SYNCFILE)
-    if err != nil { fp.Close(); panic(err) }
-    v = 42
-    _, err = fmt.Fscanf(fp, "%d", &v)
-    if err != nil && err != io.EOF { fp.Close(); panic(err) }
-    fp.Close()
-  }
-  if err = os.Remove(SYNCFILE) ; err != nil {
+}
+// Write a '1' into /tmp/.garbage and then close it.
+// Pause execution until /tmp/.garbage reads '0'.
+func badsync() {
+  wait_for_0()
+  write_1()
+}
+func killsyncfile() {
+  if err := os.Remove(SYNCFILE) ; err != nil {
     fmt.Fprintf(os.Stderr, "[Go] error removing %s! %v\n", SYNCFILE, err)
   }
 }
@@ -79,6 +86,7 @@ func TestSymbolsProcess(t *testing.T) {
     t.FailNow()
   }
   t.Logf("inferior started with PID %d\n", inferior.PID())
+  killsyncfile()
   /* wait for 1 event, i.e. the notification that the child has exec'd */
   status := <- inferior.Events()
   if status == nil {
