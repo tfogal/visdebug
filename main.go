@@ -419,9 +419,15 @@ func wait_for_breakpoint(inferior *ptrace.Tracee, address uintptr) error {
     return fmt.Errorf("child could not continue: %v", err)
   }
 
-  stat := <- inferior.Events() // ... it will come back, if meant to be.
+  stat := <- inferior.Events() // ... it will come back, if it's meant to be.
   status := stat.(syscall.WaitStatus)
   if status.Exited() { return io.EOF }
+  if status.CoreDump() {
+    return errors.New("abnormal termination, core dumped")
+  }
+  if status.StopSignal() != syscall.SIGTRAP {
+    return fmt.Errorf("unexpected signal %d\n", status.StopSignal())
+  }
 
   // restore the correct instruction ...
   newinsn, err := inferior.ReadWord(address)
@@ -443,19 +449,10 @@ func wait_for_breakpoint(inferior *ptrace.Tracee, address uintptr) error {
 
   stat = <- inferior.Events() // eat the trap we get from single stepping
   status = stat.(syscall.WaitStatus)
-  if status.Exited() { fmt.Printf("ch exited\n") }
-  if status.Signaled() { fmt.Printf("ch was signaled\n") }
-  if status.Continued() { fmt.Printf("ch was continued\n") }
-  if status.Stopped() { fmt.Printf("ch stopped: %v\n", status.StopSignal()) }
   if !status.Stopped() || status.StopSignal() != syscall.SIGTRAP {
+    procstatus(inferior.PID(), status)
     return fmt.Errorf("expecting sigtrap, got %d instead!", status)
   }
-/*
-  if err = inferior.SingleStep() ; err != nil {
-    return fmt.Errorf("could not step through call: %v", err)
-  }
-  stat = <- inferior.Events() // eat the trap we get from single stepping
-*/
 
   return nil
 }
@@ -494,9 +491,14 @@ func mallocs(argv []string) {
     if err == io.EOF {
       break
     } else if err != nil {
-      panic(err)
+      fmt.Fprintf(os.Stderr, "application exited abornally, giving up.\n")
+      break;
     }
-    fmt.Printf("saw a malloc...\n")
+    fmt.Printf("[go] application malloc'd.\n")
+/*  This is all broken.  We need to do read .eh_frame/.debug_frame and decode
+    them.  Then we'll know when malloc actually ends, and we can set a
+    breakpoint there and finally read the return value.
+    The ABI says the return value should go in RAX.  The argument goes in RDI.
     // A malloc call is a 5 byte instruction.  So break when we're back.
     err = wait_for_breakpoint(inferior, symmalloc.Address()+5)
     if err == io.EOF {
@@ -504,7 +506,19 @@ func mallocs(argv []string) {
     } else if err != nil {
       panic(err)
     }
-    fmt.Printf("BACK from malloc.\n")
+    // I *wish* that RAX had our malloc return value now.  But it looks like
+    // the address+5 breakpoint above just got us into the call, whereas we
+    // wanted to stop just after the call *returned*.  le sigh...
+    regs, err := inferior.GetRegs()
+    if err != nil { panic(err) }
+    fmt.Printf("looking for retval at: 0x%x, or 0x%x\n", regs.Rbp-8, regs.Rax)
+    ptr, err := inferior.ReadWord(uintptr(regs.Rbp-8))
+    if err != nil {
+      fmt.Fprintf(os.Stderr, "%v\n", err)
+    } else {
+      fmt.Printf("BACK from malloc.  retval was: 0x%x\n", ptr)
+    }
+*/
   }
   inferior.Close()
 }
