@@ -209,6 +209,7 @@ func Symbols(bfd *C.bfd) ([]Symbol) {
   return symbols;
 }
 
+// easy way to enable/disable debugging prints.
 //var strm = os.Stdout
 var strm = ioutil.Discard
 

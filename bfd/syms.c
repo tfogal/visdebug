@@ -120,6 +120,7 @@ print_section_headers(const uintptr_t addr, const size_t nhdrs, pid_t pid) {
 uintptr_t
 whereami(pid_t inferior) {
   struct user_regs_struct regs;
+  regs.rip = 0x0;
   if(ptrace(PTRACE_GETREGS, inferior, 0, &regs) != 0) {
     perror("getting registers");
     return 0x0;

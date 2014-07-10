@@ -42,9 +42,79 @@ handle_signal(int sig) {
   exit(EXIT_FAILURE);
 }
 
+static int
+wait_inferior(pid_t inf, int sigexpect) {
+  int wstat;
+  printf("waiting for %d...\n", sigexpect);
+  do {
+    const pid_t sub = waitpid(inf, &wstat, WCONTINUED);
+    if(sub < 0) {
+      perror("waitpid");
+      return -1;
+    }
+    if(WIFEXITED(sub)) {
+      printf("%ld exited: %d\n", (long)inf, WEXITSTATUS(sub));
+      return WEXITSTATUS(sub);
+    }
+    if(WIFSTOPPED(sub)) {
+      printf("%ld stopped: %d\n", (long)inf, WSTOPSIG(sub));
+      if(sigexpect == WSTOPSIG(sub)) { return 0; }
+    }
+    if(WIFCONTINUED(sub)) { printf("%ld continued.\n", (long)inf); }
+    if(WIFSIGNALED(sub)) {
+      printf("%ld terminated by signal %d\n", (long)inf, WTERMSIG(sub));
+      //return WTERMSIG(sub);
+    }
+    printf("Nadda.  Spinning...\n");
+    sleep(1);
+  } while(1);
+  printf("Done!\n");
+}
+
+/* sets the instruction pointer back 1, i.e. after a breakpoint. */
+static void
+ip_minus_1(long inferior) {
+  struct user_regs_struct regs;
+  regs.rip = 0x0;
+  if(ptrace(PTRACE_GETREGS, inferior, 0, &regs) != 0) {
+    perror("getting IP register");
+    return;
+  }
+  regs.rip -= 1;
+  if(ptrace(PTRACE_SETREGS, inferior, 0, &regs) != 0) {
+    perror("setting IP register");
+    return;
+  }
+}
+
+static void
+go(pid_t inf) {
+  if(ptrace(PTRACE_CONT, inf, 0,0)) {
+    perror("Ptrace continue");
+  }
+}
+
+static void
+synchronize() {
+/*
+  int word = 42;
+  int m;
+  do {
+    FILE* fp = fopen("/tmp/.garbage", "r");
+    if(NULL == fp) { continue; }
+    m = fscanf(fp, "%d", &word);
+    fclose(fp);
+  } while(m == 0 || word != 0);
+  printf("parent received the 0.\n");
+*/
+  FILE* wr1 = fopen("/tmp/.garbage", "w+");
+  fprintf(wr1, "1\n");
+  fclose(wr1);
+}
+
 int
 main(int argc, char *argv[]) {
-  if(argc != 2) {
+  if(argc < 2) {
     fprintf(stderr, "need PID to analyze\n");
     return EXIT_FAILURE;
   }
@@ -53,7 +123,6 @@ main(int argc, char *argv[]) {
   const pid_t inferior = (pid_t)atoi(argv[1]);
   if(ptrace(PTRACE_ATTACH, inferior, 0,0)) {
     perror("ptrace attach");
-    ptrace(PTRACE_DETACH, inferior, 0,0);
     return EXIT_FAILURE;
   }
   { /* make sure child loses ATTACHd state if we die. */
@@ -64,6 +133,11 @@ main(int argc, char *argv[]) {
       }
     }
   }
+  printf("Attached.  waiting for SIGSTOP.\n");
+  if(wait_inferior(inferior, SIGSTOP) != 0) {
+    abort();
+  }
+  printf("got our sigstop.  Moving on..\n");
 
   char exe[128];
   snprintf(exe, 128, "/proc/%ld/exe", (long)inferior);
@@ -155,34 +229,30 @@ main(int argc, char *argv[]) {
       fprintf(stderr, "could not read malloc, AGAIN: %d\n", errno);
     }
   }
-  long brkword = (0xccULL << 56) | (0x00FFFFFFFFFFFFFF & word);
+  const long brkword = (0xccULL << 56) | (0x00FFFFFFFFFFFFFFULL & word);
+  printf("replacing 0x%0lx with 0x%0lx\n", word, brkword);
   if(ptrace(PTRACE_POKEDATA, inferior, symmalloc->address, brkword) == -1) {
     fprintf(stderr, "inserting breakpoint failed: %d\n", errno);
   }
-  {
-    printf("set breakpoint.  now telling the tracee to continue.\n");
-    if(kill(inferior, SIGCONT) != 0) {
-      perror("kill");
-    }
-  }
-  {
-  printf("before wait, inferior is at: 0x%0lx\n", whereami(inferior));
-  int wstat;
-  const pid_t sub = waitpid(inferior, &wstat, 0);
-  if(sub < 0) {
-    perror("waitpid");
-  }
-  }
-  printf("replacing correct malloc invocation.\n");
+  printf("starting from 0x%0lx, waiting for BP.\n", whereami(inferior));
+  go(inferior);
+  wait_inferior(inferior, SIGSTOP);
+  printf("hit breakpoint @ 0x%0lx\n", whereami(inferior));
+
+  printf("resetting instruction (0x%0lx with 0x%0lx)\n", brkword, word);
   if(ptrace(PTRACE_POKEDATA, inferior, symmalloc->address, word) == -1) {
     fprintf(stderr, "inserting breakpoint failed: %d\n", errno);
   }
-
-  printf("before cont, inferior is at: 0x%0lx\n", whereami(inferior));
-  if(ptrace(PTRACE_CONT, inferior, 0,0)) {
-    fprintf(stderr, "error continuing! %d\n", errno);
+  ip_minus_1(inferior); // set IP back so it can actually do the call.
+  if(argc == 3 && strcmp(argv[2], "-synch") == 0) {
+    printf("synchronizing by request.\n");
+    synchronize();
+    printf("wrote data\n");
+    go(inferior);
+    printf("started child, waiting...\n");
+    wait_inferior(inferior, SIGCONT);
+    printf("... back!\n");
   }
-  printf("after  cont, inferior is at: 0x%0lx\n", whereami(inferior));
 #endif
 
   free_symtable(procsym);

@@ -1,9 +1,10 @@
 F95=gfortran
-CFLAGS:=-std=c99 -Wall -Wextra -ggdb3 -fPIC
+CFLAGS:=-std=gnu99 -Wall -Wextra -ggdb3 -fPIC -fno-omit-frame-pointer
 FFLAGS:=-Wall -Wextra -ggdb3 -fPIC
 obj:=3dloop.o badsync.o vardim.o switch.o bcont.o nested.o loops.o waitfor.o \
-  tiny.o use.o
-all: $(obj) 3dloop dimensional branching contbreak nest forloops pauser
+  tiny.o use.o smooth3d.o stack.o
+all: $(obj) 3dloop dimensional branching contbreak nest forloops pauser s3d \
+  checkstack
 
 3dloop: 3dloop.o
 	$(CC) $(CFLAGS) $^ -o $@ $(LDLIBS)
@@ -12,6 +13,9 @@ dimensional: vardim.o
 	$(CC) $(CFLAGS) $^ -o $@ $(LDLIBS)
 
 branching: switch.o
+	$(CC) $(CFLAGS) $^ -o $@ $(LDLIBS)
+
+checkstack : stack.o badsync.o
 	$(CC) $(CFLAGS) $^ -o $@ $(LDLIBS)
 
 contbreak: bcont.o
@@ -26,6 +30,9 @@ forloops: loops.o
 pauser: badsync.o waitfor.o
 	$(CC) $(CFLAGS) $^ -o $@ $(LDLIBS)
 
+s3d: badsync.o smooth3d.o
+	$(CC) $(CFLAGS) $^ -o $@ $(LDLIBS)
+
 small: use.o libtiny.so
 	$(CC) $(CFLAGS) $< -o $@ -L. -ltiny $(LDLIBS)
 libtiny.so: tiny.o
@@ -36,4 +43,4 @@ libtiny.so: tiny.o
 
 clean:
 	rm -f $(obj) 3dloop dimensional branching contbreak nest forloops nested
-	rm -f pauser small
+	rm -f pauser small checkstack s3d
