@@ -28,6 +28,7 @@ program loops
   real,allocatable :: values(:)
   real,allocatable :: arr2d(:,:)
   integer :: i,j
+  integer :: nx
 
   allocate(values(10))
   do i = 1, 10
@@ -37,14 +38,15 @@ program loops
   print *,'blah:',values(3)
   deallocate(values)
 
-  allocate(arr2d(20,30))
-  do i = 1,20
+  nx = 1092
+  allocate(arr2d(nx,30))
+  do i = 1,nx
     do j = 1,30
       arr2d(i,j) = i*j;
     enddo
   enddo
   print *, '2d-before(5,5):', arr2d(5,5)
-  call smooth2(arr2d, 20, 30)
+  call smooth2(arr2d, nx, 30)
   print *, '2d(5,5):', arr2d(5,5)
   deallocate(arr2d)
 end program loops

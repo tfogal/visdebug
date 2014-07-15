@@ -1,10 +1,9 @@
 package bfd
 import "fmt"
-import "io"
-import "os"
 import "syscall"
 import "testing"
 import "github.com/tfogal/ptrace"
+import "../debug"
 
 func TestReadSymbols(t *testing.T) {
   descriptor, err := OpenR("../testprograms/dimensional", "")
@@ -21,87 +20,24 @@ func TestReadSymbols(t *testing.T) {
   }
 }
 
-func startproc(arguments []string, t *testing.T) (*os.Process, error) {
-  sattr := syscall.SysProcAttr{
-    Chroot: "",
-    Credential: nil,
-    Ptrace: true,
-    Setsid: false,
-    Setpgid: false,
-    Setctty: false,
-    Noctty: false,
-    Ctty: 0,
-    Pdeathsig: syscall.SIGCHLD,
-  };
-  files := []*os.File{os.Stdin, os.Stdout, os.Stderr};
-  attr := os.ProcAttr{ Dir: ".", Env: nil, Files: files, Sys: &sattr };
-
-  chld, err := os.StartProcess(arguments[0], arguments, &attr);
-  if err != nil { return nil, err }
-
-  if err = syscall.Kill(chld.Pid, syscall.SIGSTOP) ; err != nil {
-    t.Fatalf("could not stop child %d! %d\n", chld.Pid)
-  }
-  return chld, err
-}
-
-const SYNCFILE string = "/tmp/.garbage";
-func wait_for_0() {
-  v := uint(42)
-  fmt.Printf("[Go] Waiting for 0 in %s...\n", SYNCFILE)
-  for v != 0 {
-    fp, err := os.Open(SYNCFILE)
-    if err != nil { fp.Close(); continue }
-    v = 42
-    _, err = fmt.Fscanf(fp, "%d", &v)
-    if err != nil && err != io.EOF { fp.Close(); panic(err) }
-    fp.Close()
-  }
-}
-func write_1() {
-  fmt.Printf("[Go] Writing 1 into %s\n", SYNCFILE)
-  fp, err := os.OpenFile(SYNCFILE, os.O_RDWR | os.O_CREATE | os.O_TRUNC, 0666)
-  if err != nil { panic(err) }
-  _, err = fmt.Fprintf(fp, "%d\n", 1)
-  if err != nil { panic(err) }
-  fp.Close()
-}
-// Write a '1' into /tmp/.garbage and then close it.
-// Pause execution until /tmp/.garbage reads '0'.
-func badsync() {
-  wait_for_0()
-  write_1()
-}
-func killsyncfile() {
-  if err := os.Remove(SYNCFILE) ; err != nil {
-    fmt.Fprintf(os.Stderr, "[Go] error removing %s! %v\n", SYNCFILE, err)
-  }
-}
-
 func TestSymbolsProcess(t *testing.T) {
-  argv := []string{"../testprograms/pauser", "3"}
+  argv := []string{"../testprograms/dimensional", "3"}
   inferior, err := ptrace.Exec(argv[0], argv)
   if err != nil {
     t.Fatalf("could not start subprocess, bailing: %v", err)
     t.FailNow()
   }
-  t.Logf("inferior started with PID %d\n", inferior.PID())
-  killsyncfile()
-  /* wait for 1 event, i.e. the notification that the child has exec'd */
+
+  // wait for 1 event, i.e. the notification that the child has exec'd
   status := <- inferior.Events()
   if status == nil {
     t.Fatalf("no events?")
     inferior.Close()
     return
   }
-  /* let the child run so we can do our synchronization stuff. */
-  inferior.Continue()
-  badsync()
-  /* stop the child now that we're synchronized: we can't read from it if it's
-   * actively running. */
-  if err = inferior.SendSignal(syscall.SIGSTOP) ; err != nil {
-    t.Fatalf("error telling child to stop: %v", err)
-  }
+  // wait until main so that the dynamic loader can run.
+  assert(addr_main(argv[0]) != 0x0)
+  debug.WaitUntil(inferior, addr_main(argv[0]))
 
   SymbolsProcess(inferior)
   inferior.SendSignal(syscall.SIGKILL)
@@ -116,7 +52,7 @@ func TestAttach(t *testing.T) {
     t.Skipf("could not attach (%v), can't run test.", err)
   }
   t.Logf("inferior PID %d attached.\n", inferior.PID())
-  /* wait for 1 event, i.e. the notification that the child has exec'd */
+  /* wait for 1 event, i.e. the notification of the attach */
   status := <- inferior.Events()
   if status == nil {
     t.Fatalf("no events?")
@@ -159,38 +95,40 @@ func procstate(pid int, stat syscall.WaitStatus) {
   }
 }
 
+func addr_main(program string) uintptr {
+  descriptor, err := OpenR(program, "")
+  if err != nil { return 0x0 }
+
+  symbols := Symbols(descriptor)
+
+  if err := Close(descriptor) ; err != nil {
+    return 0x0
+  }
+
+  symmain := symbol("main", symbols)
+  return symmain.Address()
+}
+
 func TestMallocInterrupt(t *testing.T) {
-  argv := []string{"../testprograms/pauser", "3"}
+  argv := []string{"../testprograms/dimensional", "3"}
   inferior, err := ptrace.Exec(argv[0], argv)
   if err != nil {
     t.Fatalf("could not start subprocess, bailing: %v", err)
     t.FailNow()
   }
-  t.Logf("inferior started with PID %d\n", inferior.PID())
-  /* wait for 1 event, i.e. the notification that the child has exec'd */
+  // wait for 1 event, i.e. the notification that the child has exec'd
   status := <- inferior.Events()
   if status == nil {
     t.Fatalf("no events?")
     inferior.Close()
     return
   }
-  // let the child run so the loader can run through all its stuff.  our
-  // 'badsync' won't return until the child gets into its own badsync, which is
-  // of course in its main, and thus guarantees the loader is finished.
-  inferior.Continue()
-  badsync()
-  // now stop the child; can't read from a running process.
-  if err = inferior.SendSignal(syscall.SIGSTOP) ; err != nil {
-    t.Fatalf("error telling child to stop: %v", err)
-  }
-  // since the tracer is notified of all inferior signals, we'll get a
-  // notification of the SIGSTOP we just sent.  Clean off the event queue.
-  status = <- inferior.Events()
-  ws := status.(syscall.WaitStatus)
-  // .. and make sure it was the event we expected.
-  if !ws.Stopped() || ws.StopSignal() != 19 {
-    t.Fatalf("should have received stopping notification?")
-  }
+
+  // pause the process until we get to 'main'.  This lets the process run
+  // through the dynamic loader, so that we can grab functions in e.g. libc.
+  if addr_main(argv[0]) == 0x0 { t.Fatalf("could not get main's address") }
+  err = debug.WaitUntil(inferior, addr_main(argv[0]))
+  if err != nil { t.Fatalf("could not wait until main: %v\n", err) }
 
   symbols, err := SymbolsProcess(inferior)
   if err != nil { t.Fatalf("%v", err) }
@@ -199,45 +137,28 @@ func TestMallocInterrupt(t *testing.T) {
   assert(present("malloc", symbols))
   symmalloc := symbol("malloc", symbols)
 
-  // get the instruction that's at that address first, so we can restore later.
-  minsn, err := inferior.ReadWord(symmalloc.Address())
-  if err != nil { t.Fatalf("%v", err) }
-  if minsn != 0xec834853fd894855 {
-    t.Fatalf("malloc call shellcode is unexpected: 0x%x\n", minsn)
-  }
-  bp := (minsn & 0xffffffffffffff00) | 0xcc
+  bp, err := debug.Break(inferior, symmalloc.Address())
+  if err != nil { t.Fatalf("insert breakpoint: %v\n", err) }
 
-  // overwrite with breakpoint (0xcc)
-  err = inferior.WriteWord(symmalloc.Address(), bp)
-  if err != nil { t.Fatalf("%v\n", err) }
-
-  // let the child continue.
-  inferior.Continue()
-
-  // now wait for the child to hit the breakpoint
-  status = <- inferior.Events()
-  ws = status.(syscall.WaitStatus)
+  // let the child run until 'malloc'.
+  if err := inferior.Continue() ; err != nil { t.Fatalf("cont: %v\n", err) }
+  status = <- inferior.Events() // actual wait comes here.
+  ws := status.(syscall.WaitStatus)
   if !ws.Stopped() || ws.StopSignal() != 5 {
     t.Fatalf("we expected to hit a breakpoint, but did not.")
   }
-  fmt.Printf("hit the breakpoint! good.\n")
 
-  // restore the instruction.
-  err = inferior.WriteWord(symmalloc.Address(), minsn)
-  if err != nil { t.Fatalf("could not restore insn: %v\n", err) }
+  if err := debug.Unbreak(inferior, bp) ; err != nil {
+    t.Fatalf("unsetting breakpoint for malloc: %v\n", err)
+  }
+  if err := debug.Stepback(inferior) ; err != nil { t.Fatal(err) }
 
-  // the CPU now *passed* that instruction, so we need to knock the
-  // instruction pointer back a notch for it to run properly.
-  iptr, err := inferior.GetIPtr()
-  if err != nil { t.Fatalf("could not get insn ptr: %v\n", err) }
-
-  // ... actually, this should be minus the size of the last instruction!
-  err = inferior.SetIPtr(iptr - 1)
-  if err != nil { t.Fatalf("could not set insn pointer: %v\n", err) }
-
+  // now the program should run until completion.
   err = inferior.Continue()
   if err != nil { t.Fatalf("continuing failed: %v\n", err) }
 
   status = <- inferior.Events()
-  procstate(inferior.PID(), status.(syscall.WaitStatus))
+  if !(status.(syscall.WaitStatus)).Exited() {
+    t.Fatalf("program did not end?")
+  }
 }

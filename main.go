@@ -12,6 +12,7 @@ import(
   "github.com/tfogal/ptrace"
   "./bfd"
   "./cfg"
+  "./debug"
 )
 
 func procstatus(pid int, stat syscall.WaitStatus) {
@@ -364,29 +365,6 @@ func instrument(argv []string) {
   }
 }
 
-const SYNCFILE string = "/tmp/.garbage";
-func wait_for_0() {
-  v := uint(42)
-  fmt.Printf("[Go] Waiting for 0 in %s...\n", SYNCFILE)
-  for v != 0 {
-    fp, err := os.Open(SYNCFILE)
-    if err != nil { fp.Close(); continue; }
-    v = 42
-    _, err = fmt.Fscanf(fp, "%d", &v)
-    if err != nil && err != io.EOF { fp.Close(); panic(err) }
-    fp.Close()
-  }
-  fmt.Printf("[Go] got the 0, moving on..\n")
-}
-func write_1() {
-  fmt.Printf("[Go] Writing 1 into %s\n", SYNCFILE)
-  fp, err := os.OpenFile(SYNCFILE, os.O_RDWR | os.O_CREATE | os.O_TRUNC, 0666)
-  if err != nil { panic(err) }
-  _, err = fmt.Fprintf(fp, "%d\n", 1)
-  if err != nil { panic(err) }
-  fp.Close()
-}
-
 func symbol(symname string, symbols []bfd.Symbol) *bfd.Symbol {
   for _, sym := range symbols {
     if sym.Name() == symname {
@@ -416,76 +394,34 @@ func sstep(inferior *ptrace.Tracee) {
   }
 }
 
-func wait_for_breakpoint(inferior *ptrace.Tracee, address uintptr) error {
-  // we only need to change one byte, but we need to write a word.  thus we'll
-  // need to read the whole word and replace just the byte we care about.
-  insn, err := inferior.ReadWord(address)
-  if err != nil { return err }
-  const imask = 0xffffffffffffff00
-  bp := (insn & imask) | 0xcc // 0xcc is "the" breakpoint opcode.
-
-  // overwrite with breakpoint (0xcc)
-  err = inferior.WriteWord(address, bp)
-  if err != nil { return err }
-
-  if err = inferior.Continue() ; err != nil {
-    return fmt.Errorf("child could not continue: %v", err)
-  }
-
-  stat := <- inferior.Events()
-  status := stat.(syscall.WaitStatus)
-  if status.Exited() { return io.EOF }
-  if status.CoreDump() {
-    return errors.New("abnormal termination, core dumped")
-  }
-  if status.StopSignal() != syscall.SIGTRAP {
-    return fmt.Errorf("unexpected signal %d\n", status.StopSignal())
-  }
-
-  // restore the correct instruction ...
-  newinsn, err := inferior.ReadWord(address)
-  if err != nil { return err }
-
-  err = inferior.WriteWord(address, (newinsn & imask) | (insn & 0xFF))
-  if err != nil { return fmt.Errorf("could not restore insn: %v\n", err) }
-
-  // ... back up the instruction pointer, and ...
-  iptr, err := inferior.GetIPtr()
-  if err != nil { return fmt.Errorf("could not get insn ptr: %v\n", err) }
-  err = inferior.SetIPtr(iptr - 1)
-  if err != nil { return fmt.Errorf("could not set insn pointer: %v\n", err) }
-
-  // Okay, we can't sstep here, because that jumps IN to the call, and we need
-  // to read RSP so that we know *which* call site this is.  *RSP right now
-  // will be the first instruction *after* the call.  We can set a BP there and
-  // then wait 'til we hit it.  When we do hit it, we should be able to
-  // investigate RAX for the return value (i.e. the pointer malloc gave).  Woo!
-  // ... execute the 'call'.
-  //sstep(inferior)
-
-  return nil
-}
-
 func iptr(inf *ptrace.Tracee) uintptr {
   addr, err := inf.GetIPtr()
   if err != nil { panic(err) }
   return addr
 }
 
-// very awful.
-func synchronize(inferior *ptrace.Tracee) {
-  if err := inferior.Continue() ; err != nil {
-    panic(fmt.Errorf("error letting inferior start: %v", err))
-  }
-  wait_for_0()
-  if err := inferior.SendSignal(syscall.SIGSTOP) ; err != nil {
-    panic(fmt.Errorf("could not stop inferior: %v\n", err))
-  }
-  eatstatus(<-inferior.Events()) // eat SIGSTOP notification
+func mainsync(program string, inferior *ptrace.Tracee) error {
+  descriptor, err := bfd.OpenR(program, "")
+  if err != nil { return err }
+  symbols := bfd.Symbols(descriptor)
 
-  fmt.Printf("[Go] inferior stopped @ 0x%0x\n", iptr(inferior))
-  // now that it's stopped, write the stuff that says it can run, for later.
-  write_1()
+  if err := bfd.Close(descriptor) ; err != nil { return err }
+
+  symmain := symbol("main", symbols)
+  // probably means 'program' isn't actually a program, maybe a SO or something.
+  if symmain == nil { return fmt.Errorf("no 'main' function in symlist") }
+
+  err = debug.WaitUntil(inferior, symmain.Address())
+  if err == io.EOF {
+    return fmt.Errorf("inferior exited before it hit main?")
+  } else if err != nil { return err }
+
+  iptr, err := inferior.GetIPtr()
+  if err != nil { return err }
+  fmt.Printf("[go] hit main at 0x%0x\n", iptr)
+
+  // now we're at main and the program is stopped.
+  return nil
 }
 
 func eatstatus(stat ptrace.Event) {
@@ -509,42 +445,52 @@ func rspchecks(inferior *ptrace.Tracee) {
 }
 
 func mallocs(argv []string) {
-  os.Remove(SYNCFILE)
   inferior, err := ptrace.Exec(argv[0], argv)
   if err != nil {
     panic(fmt.Errorf("could not start program: %v", err))
   }
   <- inferior.Events() // eat initial 'process is starting' notification.
 
-  synchronize(inferior)
+  mainsync(argv[0], inferior)
 
   symbols, err := bfd.SymbolsProcess(inferior)
   if err != nil {
     panic(fmt.Errorf("could not read inferior's symbols: %v\n", err))
   }
   symmalloc := symbol("malloc", symbols)
-  if symmalloc == nil { panic("no malloc?!") }
+  if symmalloc == nil {
+    fmt.Fprintf(os.Stderr, "Binary does not use 'malloc'.  Giving up.\n")
+    inferior.SendSignal(syscall.SIGTERM)
+    inferior.Close()
+    return
+  }
 
   for {
-    err = wait_for_breakpoint(inferior, symmalloc.Address())
+    fmt.Printf("waiting for malloc at 0x%0x\n", symmalloc.Address())
+    err = debug.WaitUntil(inferior, symmalloc.Address())
     if err == io.EOF {
       break
     } else if err != nil {
-      fmt.Fprintf(os.Stderr, "[go] application exited abnormally, giving up.\n")
+      fmt.Fprintf(os.Stderr, "[go] application exited abnormally: %v\n", err)
       break;
     }
+    // At this point, we hit 'malloc'.  *RSP is where the call returns to.  RDI
+    // has the first integer argument, as per the x86-64 ABI.
+    // Let's set a breakpoint on the return site.  After malloc returns, we can
+    // pull the return value from RAX (again, see the x86-64 ABI)
     regs, err := inferior.GetRegs()
     if err != nil { panic(err) }
     nbytes := regs.Rdi // malloc's argument, an integer, goes in RDI.
+    // the address at *RSP is where the code will return to.
     retsite, err := inferior.ReadWord(uintptr(regs.Rsp))
     if err != nil { panic(err) }
-    fmt.Printf("[go] malloc(%d) -> ", nbytes)
+    fmt.Printf("[go] malloc(%4d) -> ", nbytes)
 
-    err = wait_for_breakpoint(inferior, uintptr(retsite))
+    err = debug.WaitUntil(inferior, uintptr(retsite))
     if err != nil { panic(err) }
     regs, err = inferior.GetRegs()
     if err != nil { panic(err) }
-    fmt.Printf("0x%0x\n", regs.Rax)
+    fmt.Printf("0x%08x\n", regs.Rax)
   }
   fmt.Printf("[go] inferior (%d) terminated.\n", inferior.PID())
   inferior.Close()
@@ -560,7 +506,10 @@ func symbolinfo(inferior *ptrace.Tracee) {
 
   n := 0
   for _, v := range symbols {
-    if v.Name() == "malloc" { n++ }
+    if v.Name() == "malloc" {
+      n++
+      fmt.Printf("malloc @ 0x%0x\n", v.Address())
+    }
   }
   fmt.Printf("There are %d 'malloc's in the symbol table.\n", n)
   symcalloc := symbol("calloc", symbols)

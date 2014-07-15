@@ -60,8 +60,3 @@ func Watch(addr *uint8) (error) {
 func breakpoint(addr *uint8) (error) {
   return errors.New("unimplemented");
 }
-
-/* Inserts a new breakpoint at the given function. */
-func Break(function string) (error) {
-  return errors.New("unimplemented");
-}

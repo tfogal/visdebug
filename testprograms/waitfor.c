@@ -6,7 +6,6 @@
 #include <signal.h>
 #include <sys/types.h>
 #include <unistd.h>
-#include "badsync.h"
 
 static float* v3darr;
 static size_t dims[3] = {10, 20, 30};
@@ -48,8 +47,8 @@ int main(int argc, char* argv[]) {
   }
   printf("[ c] my PID is %ld\n", (long)getpid());
   signal(SIGUSR1, handle_signal);
-  badsync();
-  printf("[ c] Synchronized. Moving on...\n");
+
+  pause();
 
   void* justtest;
   if(argc == 42) { dims[0] = 12398; }
@@ -66,7 +65,6 @@ int main(int argc, char* argv[]) {
       free(justtest);
     } else {
       fprintf(stderr, "[ c] unknown computational id '%s'\n", argv[i]);
-      //return EXIT_FAILURE;
     }
   }
   justtest = malloc(19);

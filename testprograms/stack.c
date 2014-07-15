@@ -6,7 +6,6 @@
 #include <signal.h>
 #include <sys/types.h>
 #include <unistd.h>
-#include "badsync.h"
 
 static void
 handle_signal(int sig) {
@@ -42,8 +41,6 @@ int main(int argc, char* argv[]) {
   }
   printf("[ c] my PID is %ld\n", (long)getpid());
   signal(SIGUSR1, handle_signal);
-  badsync();
-  printf("[ c] Synchronized. Moving on...\n");
 
   if(atoi(argv[1]) == 19) { // don't let compiler optimize x,y,z out.
     printf("x,y,z: %d %d %d\n", x,y,z);

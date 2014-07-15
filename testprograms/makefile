@@ -1,10 +1,11 @@
 F95=gfortran
+CXXFLAGS:=-std=c++11 -Wall -Wextra -ggdb3 -fPIC
 CFLAGS:=-std=gnu99 -Wall -Wextra -ggdb3 -fPIC -fno-omit-frame-pointer
 FFLAGS:=-Wall -Wextra -ggdb3 -fPIC
-obj:=3dloop.o badsync.o vardim.o switch.o bcont.o nested.o loops.o waitfor.o \
-  tiny.o use.o smooth3d.o stack.o
+obj:=3dloop.o vardim.o switch.o bcont.o nested.o loops.o waitfor.o \
+  tiny.o use.o smooth3d.o stack.o indirect.o
 all: $(obj) 3dloop dimensional branching contbreak nest forloops pauser s3d \
-  checkstack
+  checkstack indirect
 
 3dloop: 3dloop.o
 	$(CC) $(CFLAGS) $^ -o $@ $(LDLIBS)
@@ -15,7 +16,7 @@ dimensional: vardim.o
 branching: switch.o
 	$(CC) $(CFLAGS) $^ -o $@ $(LDLIBS)
 
-checkstack : stack.o badsync.o
+checkstack : stack.o
 	$(CC) $(CFLAGS) $^ -o $@ $(LDLIBS)
 
 contbreak: bcont.o
@@ -27,20 +28,24 @@ nest: nested.o
 forloops: loops.o
 	$(F95) $(FFLAGS) $^ -o $@ $(LDLIBS)
 
-pauser: badsync.o waitfor.o
+pauser: waitfor.o
 	$(CC) $(CFLAGS) $^ -o $@ $(LDLIBS)
 
-s3d: badsync.o smooth3d.o
+s3d: smooth3d.o
 	$(CC) $(CFLAGS) $^ -o $@ $(LDLIBS)
 
 small: use.o libtiny.so
 	$(CC) $(CFLAGS) $< -o $@ -L. -ltiny $(LDLIBS)
+
 libtiny.so: tiny.o
 	$(CC) $(CFLAGS) -shared -fPIC $^ -o $@
+
+indirect: indirect.o
+	$(CXX) $(CXXFLAGS) -fPIC $^ -o $@
 
 %.o: %.f95
 	$(F95) -c $(FFLAGS) $^ -o $@
 
 clean:
 	rm -f $(obj) 3dloop dimensional branching contbreak nest forloops nested
-	rm -f pauser small checkstack s3d
+	rm -f pauser small checkstack s3d indirect

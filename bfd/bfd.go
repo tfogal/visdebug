@@ -15,6 +15,7 @@ import "io/ioutil"
 import "os"
 import "reflect"
 import "sort"
+import "strings"
 import "unsafe"
 import "github.com/tfogal/ptrace"
 
@@ -326,6 +327,20 @@ func filter_symbols(sy []Symbol, existing []Symbol) []Symbol {
   return rv
 }
 
+// there are some symbols, e.g. malloc, that we always need, even if the
+// application didn't call them directly.  you might think that every
+// application needs malloc, but a fortran application, for example, only calls
+// malloc through a shared library
+type needed_sym struct {
+  fromlibrary string
+  symname string
+}
+var needed = []needed_sym{
+  {"libc.so", "malloc"},
+  {"libc.so", "calloc"},
+  {"libc.so", "free"},
+}
+
 /* reads symbols from the process, properly relocating them to get their actual
  * address. */
 func SymbolsProcess(inferior *ptrace.Tracee) ([]Symbol, error) {
@@ -361,37 +376,31 @@ func SymbolsProcess(inferior *ptrace.Tracee) ([]Symbol, error) {
     // skip the 'in memory image only' kind of library.
     if libname == "" || err != nil { continue }
     defer fp.Close()
-    sy, err := read_symbols_file(fp)
+    libsym, err := read_symbols_file(fp)
     if err != nil { panic(err) }
-    libsym := filter_symbols(sy, symbols) // drop symbols we don't care about
-    fmt.Fprintf(strm, "Read %d symbols from %s, relocating %d by 0x%x\n",
-                len(sy), libname, len(libsym), lmap.l_addr)
+
+    fmt.Fprintf(strm, "Read %d symbols from %s, relocating by 0x%x\n",
+                len(libsym), libname, lmap.l_addr)
 
     relocate_symbols(libsym, uintptr(lmap.l_addr))
+
+    // most of the time, unless the symbols already exist in the main
+    // executable, we don't care about them.  however, there a few symbols in
+    // shared libraries that we really need, regardless of if they are directly
+    // used by the application.
+    for _, need := range needed {
+      if strings.Contains(libname, need.fromlibrary) {
+        symb := find_symbol(need.symname, libsym)
+        if symb != nil {
+          fmt.Fprintf(strm, "Adding %s from %s.\n", symb.Name(), libname)
+          symbols = append(symbols, *symb)
+        }
+      }
+    }
+
     fix_symbols(symbols, libsym)
 
     if lmap_addr == 0x0 { break }
-  }
-
-  { sympause := find_symbol("pause", symbols)
-    if sympause != nil {
-      fmt.Fprintf(strm, "%10s@0x%0x\n", "pause", sympause.addr)
-    }
-  }
-  { symmalloc := find_symbol("malloc", symbols)
-    if symmalloc != nil {
-      fmt.Fprintf(strm, "%10s@0x%0x\n", "malloc", symmalloc.addr)
-    }
-  }
-  { symfree := find_symbol("free", symbols)
-    if symfree != nil {
-      fmt.Fprintf(strm, "%10s@0x%0x\n", "free", symfree.addr)
-    }
-  }
-  { symcalloc := find_symbol("calloc", symbols)
-    if symcalloc != nil {
-      fmt.Fprintf(strm, "%10s@0x%0x\n", "calloc", symcalloc.addr)
-    }
   }
   /*for i:=0; i < len(symbols); i++ {
     fmt.Printf("\t%30s 0x%12x\n", symbols[i].name, symbols[i].addr)

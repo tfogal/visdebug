@@ -4,7 +4,6 @@
 #include <stdlib.h>
 #include <signal.h>
 #include <unistd.h>
-#include "badsync.h"
 
 static size_t dims[3] = {10, 20, 30};
 
@@ -108,8 +107,6 @@ int main(int argc, char* argv[]) {
     printf("arg[%zu]: %s\n", i, argv[i]);
   }
   signal(SIGUSR1, handle_signal);
-  badsync();
-  printf("[ c] Synchronized. Moving on...\n");
   if(argc == 42) { dims[0] = 12398; }
   for(size_t i=1; i < (size_t)argc; ++i) {
     if(atoi(argv[i]) == 3) {
