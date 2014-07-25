@@ -52,7 +52,6 @@ int main(int argc, char* argv[]) {
     fprintf(stderr, "need arg: which computation to run.\n");
     return EXIT_FAILURE;
   }
-  sleep(4);
   if(argc == 42) { dims[0] = 12398; }
   for(size_t i=1; i < (size_t)argc; ++i) {
     if(atoi(argv[i]) == 0) {
