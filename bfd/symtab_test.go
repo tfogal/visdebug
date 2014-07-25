@@ -6,15 +6,9 @@ import "github.com/tfogal/ptrace"
 import "../debug"
 
 func TestReadSymbols(t *testing.T) {
-  descriptor, err := OpenR("../testprograms/dimensional", "")
-  if err != nil {
-    t.Fatalf("error opening bfd: %v\n", err)
-  }
-  symbols := Symbols(descriptor)
+  symbols, err := Symbols("../testprograms/dimensional")
+  if err != nil { t.Fatalf("error loading symbols: %v\n", err) }
 
-  if err := Close(descriptor) ; err != nil {
-    t.Fatalf("could not close bfd file: %v\n", err)
-  }
   if len(symbols) < 20 {
     t.Fatalf("symbol reading broken?  only read %d symbols.", len(symbols))
   }
@@ -96,14 +90,8 @@ func procstate(pid int, stat syscall.WaitStatus) {
 }
 
 func addr_main(program string) uintptr {
-  descriptor, err := OpenR(program, "")
-  if err != nil { return 0x0 }
-
-  symbols := Symbols(descriptor)
-
-  if err := Close(descriptor) ; err != nil {
-    return 0x0
-  }
+  symbols, err := Symbols(program)
+  if err != nil { panic(err) }
 
   symmain := symbol("main", symbols)
   return symmain.Address()

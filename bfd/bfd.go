@@ -1,9 +1,7 @@
 package bfd
 // #include <stdio.h>
 // #include <stdlib.h>
-// #include <bfd.h>
 // #include <elf.h>
-// #include "wrapbfd.h"
 // #include "syms.h"
 // #cgo CFLAGS: -std=gnu99
 // #cgo LDFLAGS: -lbfd
@@ -128,86 +126,30 @@ func (s SymList) Len() int { return len(s); }
 func (s SymList) Less(i int, j int) bool { return s[i].name < s[j].name }
 func (s SymList) Swap(i int, j int) { s[i], s[j] = s[j], s[i] }
 
-/* Open a BFD file read-only.  Use a target string of "" for a null pointer.
- * Returned memory must eventually be passed to Close. */
-func OpenR(filename string, target string) (*C.bfd, error) {
-  var cfilename *_Ctype_char;
-  cfilename = C.CString(filename);
-  ctarget := C.CString(target);
-  defer C.free(unsafe.Pointer(cfilename));
-  if target == "" {
-    C.free(unsafe.Pointer(ctarget));
-    ctarget = nil;
-  }
-  defer C.free(unsafe.Pointer(ctarget));
+func Symbols(executable string) ([]Symbol, error) {
+  binary, err := elf.Open(executable)
+  if err != nil { return nil, err }
 
+  syms, err := binary.Symbols()
+  if err != nil { return nil, err }
 
-  bfd := C.bfd_openr(cfilename, ctarget);
-  if bfd == nil {
-    return bfd, errors.New("could not open file")
-  }
+  symbols := make([]Symbol, 0)
+  for i,_ := range syms {
+    if syms[i].Name == "" { continue } // skip "blank" symbols.
+    sbind := elf.ST_BIND(syms[i].Info)
+    stype := elf.ST_TYPE(syms[i].Info)
 
-  err := C.bfd_check_format(bfd, bfd_archive);
-  /* confusingly, that doesn't return normal TRUE/FALSE error conditions. */
-  if err == 1 {
-    Close(bfd);
-    return nil, errors.New("(BFD) invalid format");
+    s := Symbol{name: syms[i].Name,  addr: uintptr(syms[i].Value), flags: 0}
+    if sbind == elf.STB_LOCAL { s.flags |= bfd_BSF_LOCAL }
+    if sbind == elf.STB_GLOBAL { s.flags |= bfd_BSF_GLOBAL }
+    if sbind == elf.STB_WEAK { s.flags |= bfd_BSF_WEAK }
+    if stype == elf.STT_FUNC { s.flags |= bfd_BSF_FUNCTION }
+    if stype == elf.STT_OBJECT { s.flags |= bfd_BSF_OBJECT }
+    symbols = append(symbols, s)
   }
 
-  /* if we don't do this, later calls that actually read things on the BFD will
-   * segfault. */
-  err = C.bfd_check_format_matches(bfd, bfd_object, nil);
-  if err == FALSE {
-    Close(bfd);
-    // Two points for honesty.
-    return nil, errors.New("(BFD) i honestly do not know.");
-  }
-
-  return bfd, nil;
-}
-
-func Close(bfd *C.bfd) (error) {
-  rv := C.bfd_close(bfd);
-  if rv == FALSE {
-    return errors.New("unknown error closing BFD");
-  }
-  return nil;
-}
-
-func Symbols(bfd *C.bfd) ([]Symbol) {
-  flags := bfd.flags;
-  if flags & bfd_HAS_SYMS == 0 {
-    return nil;
-  }
-  var nsymbols C.unsigned;
-  symtab := C.readsyms(bfd, &nsymbols);
-  if symtab == nil {
-    panic("binary has symbols but no symbols given when read!")
-  }
-
-  /* Go won't let us index our 'symtab'.  So hack it into a go slice first */
-  var gosymtab []*C.asymbol;
-  header := (*reflect.SliceHeader)((unsafe.Pointer(&gosymtab)));
-  header.Cap = int(nsymbols);
-  header.Len = int(nsymbols);
-  header.Data = uintptr(unsafe.Pointer(symtab));
-
-  // now construct our return value: a slice of symbols.
-  symbols := make([]Symbol, nsymbols);
-  for i:=uint(0); i < uint(nsymbols); i++ {
-    symbols[i].name = C.GoString(gosymtab[i].name)
-    symbols[i].flags = uint(gosymtab[i].flags);
-
-    // the address we get from gosymtab[i].udata[:] is often null, and doesn't
-    // match up with 'nm' gives.  Not really sure what it is, yet, but
-    // 'bfd_symbol_info' seems to give back addresses that agree with 'nm'.
-    var info C.symbol_info;
-    C.bfd_symbol_info(gosymtab[i], &info);
-    symbols[i].addr = uintptr(info.value);
-  }
-
-  C.free(unsafe.Pointer(symtab));
-  return symbols;
+  binary.Close()
+  return symbols, nil
 }
 
 // easy way to enable/disable debugging prints.

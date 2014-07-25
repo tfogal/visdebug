@@ -32,16 +32,8 @@ func procstatus(pid int, stat syscall.WaitStatus) {
 }
 
 func readsymbols(filename string) {
-  desc, err := bfd.OpenR(filename, "");
-  if err != nil {
-    fmt.Printf("error opening bfd: %v\n", err);
-    panic("bfd.OpenR");
-  }
-  symbols := bfd.Symbols(desc);
-  if err = bfd.Close(desc) ; err != nil {
-    fmt.Printf("error closing bfd: %v\n", err);
-    panic("bfd.Close")
-  }
+  symbols, err := bfd.Symbols(filename)
+  if err != nil { panic(err) }
 
   for _, symbol := range symbols {
     // skip internal symbols.
@@ -53,9 +45,12 @@ func readsymbols(filename string) {
     flags := "";
     if(symbol.Local()) { flags += "LOCAL " } else { flags += "      " }
     if(symbol.Global()) { flags += "GLOBAL " } else { flags += "       " }
-    if(symbol.Exported()) { flags += "EXPORT " } else { flags += "       " }
     if(symbol.Debug()) { flags += "DBG " } else { flags += "    " }
     if(symbol.Function()) { flags += "FQN " } else { flags += "    " }
+    if(symbol.Weak()) { flags += "WEAK " } else { flags += "     " }
+    if(symbol.Indirect()) { flags += "IND " } else { flags += "    " }
+    if(symbol.Dynamic()) { flags += "DYN " } else { flags += "    " }
+    if(symbol.IndirectFunction()) { flags += "IFQN " } else { flags += "     " }
     fmt.Printf("%s %s\n", flags, symbol.Name());
   }
 }
@@ -401,11 +396,8 @@ func iptr(inf *ptrace.Tracee) uintptr {
 }
 
 func mainsync(program string, inferior *ptrace.Tracee) error {
-  descriptor, err := bfd.OpenR(program, "")
+  symbols, err := bfd.Symbols(program)
   if err != nil { return err }
-  symbols := bfd.Symbols(descriptor)
-
-  if err := bfd.Close(descriptor) ; err != nil { return err }
 
   symmain := symbol("main", symbols)
   // probably means 'program' isn't actually a program, maybe a SO or something.
