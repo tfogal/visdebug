@@ -7,6 +7,7 @@ import(
   "fmt"
   "io"
   "os"
+  "log"
   "strings"
   "syscall"
   "github.com/tfogal/ptrace"
@@ -16,14 +17,13 @@ import(
 )
 
 func procstatus(pid int, stat syscall.WaitStatus) {
-  if stat.CoreDump() { panic("core dumped"); }
+  if stat.CoreDump() { log.Fatalf("core dumped"); }
   if stat.Continued() { fmt.Printf("continued\n"); }
   if stat.Exited() {
     fmt.Printf("exited with status: %d\n", stat.ExitStatus())
   }
   if stat.Signaled() {
-    fmt.Printf("received signal: %v\n", stat.Signal())
-    panic("unexpected signal")
+    log.Fatalf("unexpected signal %v\n", stat.Signal())
   }
   if stat.Stopped() {
     fmt.Printf("stopped with signal: %v\n", stat.StopSignal())
@@ -33,7 +33,7 @@ func procstatus(pid int, stat syscall.WaitStatus) {
 
 func readsymbols(filename string) {
   symbols, err := bfd.Symbols(filename)
-  if err != nil { panic(err) }
+  if err != nil { log.Fatalf(err.Error()) }
 
   for _, symbol := range symbols {
     // skip internal symbols.
@@ -208,7 +208,7 @@ func main() {
     mallocs(argv)
   }
   if dyninfo {
-    addrinfo(argv)
+    print_address_info(argv)
   }
 }
 
@@ -327,8 +327,7 @@ func commands() (chan Command) {
 func instrument(argv []string) {
   proc, err := ptrace.Exec(argv[0], argv)
   if err != nil {
-    fmt.Printf("could not start program: %v\n", err)
-    panic("failed starting proc")
+    log.Fatalf("could not start program: %v\n", err)
   }
 
   cmds := commands()
@@ -371,27 +370,27 @@ func symbol(symname string, symbols []bfd.Symbol) *bfd.Symbol {
 
 func whereis(inferior *ptrace.Tracee) uintptr {
   iptr, err := inferior.GetIPtr()
-  if err != nil { panic(fmt.Errorf("get insn ptr failed: %v\n", err)) }
+  if err != nil { log.Fatalf("get insn ptr failed: %v\n", err) }
 
   return iptr
 }
 
 func sstep(inferior *ptrace.Tracee) {
   if err := inferior.SingleStep() ; err != nil {
-    panic(fmt.Errorf("could not step through call: %v", err))
+    log.Fatalf("could not step through call: %v", err)
   }
 
   stat := <- inferior.Events() // eat the trap we get from single stepping
   status := stat.(syscall.WaitStatus)
   if !status.Stopped() || status.StopSignal() != syscall.SIGTRAP {
     procstatus(inferior.PID(), status)
-    panic(fmt.Errorf("expecting sigtrap, got %d instead!", status))
+    log.Fatalf("expecting sigtrap, got %d instead!", status)
   }
 }
 
 func iptr(inf *ptrace.Tracee) uintptr {
   addr, err := inf.GetIPtr()
-  if err != nil { panic(err) }
+  if err != nil { log.Fatalf(err.Error()) }
   return addr
 }
 
@@ -427,36 +426,78 @@ func eatstatus(stat ptrace.Event) {
 
 func rspchecks(inferior *ptrace.Tracee) {
   regs, err := inferior.GetRegs()
-  if(err != nil) { panic(err) }
+  if(err != nil) { log.Fatalf(err.Error()) }
 
   for i:=uint64(0); i < 2; i++ {
     deref, err := inferior.ReadWord(uintptr(regs.Rsp+(i*8)))
-    if err != nil { panic(err) }
+    if err != nil { log.Fatalf(err.Error()) }
     fmt.Printf("[go] rsp-%d (0x%0x): 0x%0x\n", i*8, regs.Rsp+(i*8), deref)
   }
+}
+
+// A StackReader reads information from the inferior's stack.  This is used for
+// reading arguments of functions, as well as their return values.
+// Implementations are ABI-specific.
+// Typing is often not accurately represented.  For example, the
+// first argument to 'malloc' is best modelled as Go's uint, whereas
+// the first argument to 'strlen' is best modelled as Go's uintptr.
+// Thus we use uint64's often, here, and expect users to cast.
+type StackReader interface {
+  Arg1(*ptrace.Tracee) uint64
+  RetAddr(*ptrace.Tracee) uintptr
+  RetVal(*ptrace.Tracee) uint64
+}
+// x86_64 is a StackReader implementation which conforms to the x86-64 ABI.
+type x86_64 struct {}
+// the x86-64 ABI places the first integer argument in RDI.
+func (x86_64) Arg1(inferior *ptrace.Tracee) uint64 {
+  regs, err := inferior.GetRegs()
+  if err != nil { log.Fatalf(err.Error()) }
+  return regs.Rdi
+}
+// in the x86-64 ABI, calling a function places the return address on the
+// stack, and the RSP register points to that stack location.  So, essentially,
+// *RSP is the return address.
+// If we're in the "root" or entry function, then this function makes no sense
+// and will likely return garbage.
+func (x86_64) RetAddr(inferior *ptrace.Tracee) uintptr {
+  regs, err := inferior.GetRegs()
+  if err != nil { log.Fatalf(err.Error()) }
+
+  retaddr, err := inferior.ReadWord(uintptr(regs.Rsp))
+  if err != nil { log.Fatalf(err.Error()) }
+
+  return uintptr(retaddr)
+}
+// the x86-64 ABI places the return value in RAX.
+func (x86_64) RetVal(inferior *ptrace.Tracee) uint64 {
+  regs, err := inferior.GetRegs()
+  if err != nil { log.Fatalf(err.Error()) }
+  return regs.Rax
 }
 
 func mallocs(argv []string) {
   inferior, err := ptrace.Exec(argv[0], argv)
   if err != nil {
-    panic(fmt.Errorf("could not start program: %v", err))
+    log.Fatalf("could not start program: %v", err)
   }
   <- inferior.Events() // eat initial 'process is starting' notification.
+  defer inferior.Close()
 
   mainsync(argv[0], inferior)
 
   symbols, err := bfd.SymbolsProcess(inferior)
   if err != nil {
-    panic(fmt.Errorf("could not read inferior's symbols: %v\n", err))
+    log.Fatalf("could not read inferior's symbols: %v\n", err)
   }
   symmalloc := symbol("malloc", symbols)
   if symmalloc == nil {
     fmt.Fprintf(os.Stderr, "Binary does not use 'malloc'.  Giving up.\n")
     inferior.SendSignal(syscall.SIGTERM)
-    inferior.Close()
     return
   }
 
+  var stk x86_64
   for {
     fmt.Printf("waiting for malloc at 0x%0x\n", symmalloc.Address())
     err = debug.WaitUntil(inferior, symmalloc.Address())
@@ -466,35 +507,46 @@ func mallocs(argv []string) {
       fmt.Fprintf(os.Stderr, "[go] application exited abnormally: %v\n", err)
       break;
     }
-    // At this point, we hit 'malloc'.  *RSP is where the call returns to.  RDI
+    // At this point, we hit 'malloc'.  Let's examine the registers/stack to
+    // figure out how many bytes were given to malloc, as well as where malloc
+    // is going to return to.
+    nbytes := stk.Arg1(inferior)
+    retsite := stk.RetAddr(inferior)
+    fmt.Printf("[go] malloc(%4d) -> ", nbytes)
+
+    err = debug.WaitUntil(inferior, retsite)
+    fmt.Printf("0x%08x\n", uintptr(stk.RetVal(inferior)))
+
+    if(false) {
+    //  *RSP is where the call returns to.  RDI
     // has the first integer argument, as per the x86-64 ABI.
     // Let's set a breakpoint on the return site.  After malloc returns, we can
     // pull the return value from RAX (again, see the x86-64 ABI)
     regs, err := inferior.GetRegs()
-    if err != nil { panic(err) }
+    if err != nil { log.Fatalf(err.Error()) }
     nbytes := regs.Rdi // malloc's argument, an integer, goes in RDI.
     // the address at *RSP is where the code will return to.
     retsite, err := inferior.ReadWord(uintptr(regs.Rsp))
-    if err != nil { panic(err) }
+    if err != nil { log.Fatalf(err.Error()) }
     fmt.Printf("[go] malloc(%4d) -> ", nbytes)
 
     err = debug.WaitUntil(inferior, uintptr(retsite))
-    if err != nil { panic(err) }
+    if err != nil { log.Fatalf(err.Error()) }
     regs, err = inferior.GetRegs()
-    if err != nil { panic(err) }
+    if err != nil { log.Fatalf(err.Error()) }
     fmt.Printf("0x%08x\n", regs.Rax)
+    }
   }
   fmt.Printf("[go] inferior (%d) terminated.\n", inferior.PID())
-  inferior.Close()
 }
 
-func symbolinfo(inferior *ptrace.Tracee) {
+func print_symbol_info(inferior *ptrace.Tracee) {
   symbols, err := bfd.SymbolsProcess(inferior)
   if err != nil {
-    panic(fmt.Errorf("could not read inferior's symbols: %v\n", err))
+    log.Fatalf("could not read inferior's symbols: %v\n", err)
   }
   symmalloc := symbol("malloc", symbols)
-  if symmalloc == nil { panic("no malloc?!") }
+  if symmalloc == nil { log.Fatalf("could not find malloc symbol") }
 
   n := 0
   for _, v := range symbols {
@@ -505,21 +557,21 @@ func symbolinfo(inferior *ptrace.Tracee) {
   }
   fmt.Printf("There are %d 'malloc's in the symbol table.\n", n)
   symcalloc := symbol("calloc", symbols)
-  if symcalloc == nil { panic("no calloc?!") }
+  if symcalloc == nil { log.Fatalf("could not find calloc symbol") }
   fmt.Printf("calloc is at: 0x%x\n", symcalloc.Address())
   fmt.Printf("malloc is at: 0x%x\n", symmalloc.Address())
 }
 
-func addrinfo(argv []string) {
+func print_address_info(argv []string) {
   var pid int
   fmt.Sscanf(argv[0], "%d", &pid)
   fmt.Printf("attaching to %d\n", pid)
   inferior, err := ptrace.Attach(pid)
   if err != nil {
-    panic(fmt.Errorf("could not start program: %v", err))
+    log.Fatalf("could not start program: %v", err)
   }
   eatstatus(<-inferior.Events()) // 'process stopped' due to attach.
-  symbolinfo(inferior)
+  print_symbol_info(inferior)
 
   inferior.Detach()
   inferior.Close()
