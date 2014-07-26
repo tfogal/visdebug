@@ -7,6 +7,7 @@ import(
   "fmt"
   "io"
   "os"
+  "log"
   "strings"
   "syscall"
   "github.com/tfogal/ptrace"
@@ -163,6 +164,7 @@ var execute bool
 var dotcfg bool
 var showmallocs bool
 var dyninfo bool
+var freespace bool
 func init() {
   flag.BoolVar(&symlist, "symbols", false, "print out the symbol table")
   flag.BoolVar(&symlist, "s", false, "print out the symbol table")
@@ -170,6 +172,7 @@ func init() {
   flag.BoolVar(&dotcfg, "cfg", false, "compute and print CFG")
   flag.BoolVar(&showmallocs, "mallocs", false, "print a line per malloc")
   flag.BoolVar(&dyninfo, "attach", false, "attach and print dynamic info")
+  flag.BoolVar(&freespace, "free", false, "show maps and find first free space")
 }
 
 func basename(s string) (string) {
@@ -209,6 +212,9 @@ func main() {
   }
   if dyninfo {
     addrinfo(argv)
+  }
+  if freespace {
+    show_free_space(argv)
   }
 }
 
@@ -523,4 +529,105 @@ func addrinfo(argv []string) {
 
   inferior.Detach()
   inferior.Close()
+}
+
+// A process / shared library leaves some free space after it's loaded.  This
+// finds the first such free space.
+func free_space_address(pid int) (uintptr, error) {
+  filename := fmt.Sprintf("/proc/%d/maps", pid)
+  maps, err := os.Open(filename)
+  if err != nil {
+    return 0x0, err
+  }
+  defer maps.Close()
+
+  // an example /proc/$pid/maps entry is:
+  // address           perms offset  dev   inode   pathname
+  // 08048000-08056000 r-xp 00000000 03:0c 64593   /path/to/executable/or/lib
+  // we search for the first address which has a device of 00:00, which
+  // (supposedly?) implies that this is 'free space', unused by the process.
+  scanner := bufio.NewScanner(maps)
+  var addr uintptr
+  for scanner.Scan() {
+    line := scanner.Text()
+    var junk string
+    var junkaddr uintptr
+    var device string
+    var inode uint
+    _, err = fmt.Sscanf(line, "%x-%x %s %s %s %d", &addr, &junkaddr, &junk,
+      &junk, &device, &inode)
+    if err == io.EOF {
+      return addr, nil
+    }
+    if err != nil {
+      return 0x0, err
+    }
+
+    if device == "00:00" && inode == 0 {
+      break
+    }
+  }
+  return addr, nil
+}
+
+// prints out the contents of the given process' maps.  used for debugging
+// free_space_address.
+func viewmaps(pid int) {
+  filename := fmt.Sprintf("/proc/%d/maps", pid)
+  maps, err := os.Open(filename)
+  if err != nil {
+    panic(err)
+  }
+  defer maps.Close()
+
+  scanner := bufio.NewScanner(maps)
+  for scanner.Scan() {
+    fmt.Println(scanner.Text())
+  }
+}
+
+// temp hack for testing free space stuff
+func show_free_space(argv []string) {
+  inferior, err := ptrace.Exec(argv[0], argv)
+  if err != nil {
+    log.Fatalf("could not start program '%v': %v\n", argv, err)
+  }
+  <-inferior.Events() // eat initial 'process is starting' notification.
+  mainsync(argv[0], inferior) // run until we hit main, then pause.
+
+  fspace_addr(inferior.PID())
+  inferior.Close()
+}
+
+func fspace_addr(pid int) {
+  viewmaps(pid)
+
+  addr, err := free_space_address(pid)
+  if err != nil {
+    panic(err)
+  }
+
+  fmt.Printf("first freespace addr is at: 0x%0x\n", addr)
+
+  // at the time we get called, we're at a breakpoint for malloc.  so our
+  // replacement function has malloc's argument (n bytes) in RDI, and we need
+  // to fill RAX with whatever posix_memalign gives.
+  memalign_code := []uint8{
+    0x55,             // push %rbp
+    0x48, 0x89, 0xe5, // mov %rsp, %rbp
+    0x48, 0x83, 0xec, 0x20, // sub $0x20, %rsp  ; reserve 32bytes of stack
+    0x48, 0x89, 0x78, 0xe8, // mov %rdi, -0x18(%rbp)
+    0x48, 0xc7, 0x45, 0x48, 0x00, 0x00, 0x00, 0x00, // movq $0, -0x8(%rbp)
+    // e8 d2 fe ff ff          callq  600 <getpagesize@plt>
+    0x48, 0x63, 0xc8, // movlsq %eax, %rcx ; sign-extend GPS return value
+    0x48, 0x8b, 0x55, 0xe8, // mov -0x18(%rbp), %rdx
+    0x48, 0x8d, 0x45, 0xf8, // lea -0x8(%rbp), %rax  ; 1st stackvar to RAX
+    0x48, 0x89, 0xce, // mov %rcx, %rsi  ; GPS retval (in RCX) is 2nd arg
+    0x48, 0x89, 0xc7, // mov %rax, %rdi  ; 1st arg is from 1st stackvar
+    // e8 cc fe ff ff          callq  610 <posix_memalign@plt>
+    0x48, 0x8b, 0x45, 0xf8, // mov -0x8(%rbp), %rax
+    0xc9, // leaveq
+    0xc3, // retq
+  }
+  _ = memalign_code
 }
