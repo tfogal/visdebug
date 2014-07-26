@@ -11,7 +11,6 @@ main(int argc, char* argv[]) {
     std::cout << "got ptr: " << ptr << std::endl;
   }
   std::cout << "pid: " << (long)getpid() << std::endl;
-  pause();
   if(argc >= 2) {
     uint32_t* v = new uint32_t[atoi(argv[1])];
     std::cout << "got v: " << v << std::endl;
