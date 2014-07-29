@@ -55,107 +55,10 @@ func readsymbols(filename string) {
   }
 }
 
-func nnodes(graph map[uintptr]*cfg.Node) (uint) {
-  seen := make(map[uintptr]bool)
-  nodes := uint(0)
-  for k, _ := range graph {
-    if seen[k] { continue; }
-    seen[k] = true
-    nodes++
-  }
-  return nodes
-}
-
-type gfunc func(node *cfg.Node) ();
-func inorder(graph map[uintptr]*cfg.Node, f gfunc) {
-  seen := make(map[uintptr]bool)
-  for k, v := range graph {
-    if seen[k] { continue; }
-    inorder_helper(v, seen, f)
-    seen[k] = true
-  }
-}
-func inorder_helper(node *cfg.Node, seen map[uintptr]bool, f gfunc) {
-  if seen[node.Addr] { return }
-  f(node)
-  seen[node.Addr] = true
-  for _, edge := range node.Edgelist {
-    inorder_helper(edge.To, seen, f)
-  }
-}
-
-func fqnroot(cflow map[uintptr]*cfg.Node, name string) (*cfg.Node) {
-  for _, v := range cflow {
-    if v.Name == name { return v }
-  }
-  return nil
-}
-
 func assert(condition bool) {
   if condition == false {
     panic("assertion failure")
   }
-}
-
-// returns true iff this node has a child that points back to it.
-func loop1d(node *cfg.Node) (bool) {
-  for _, edge := range node.Edgelist {
-    target := edge.To
-    for _, childedge := range target.Edgelist {
-      if childedge.To.Addr == node.Addr {
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
-func lerp(val uint, imin uint,imax uint, omin uint,omax uint) (uint) {
-  assert(imin < imax)
-  assert(omin < omax)
-  return uint(float64(omin) + float64(val-imin) *
-                              float64(omax-omin) / float64(imax-imin))
-}
-
-// prints out a node in 'dot' notation.
-func dotNode(node *cfg.Node) {
-  fmt.Printf("\t\t\"0x%08x\" [", node.Addr)
-  if(node.Name != "") {
-    fmt.Printf("label = \"%s\", ", node.Name)
-  }
-  col := lerp(node.Dominators.Len(), 0,25, 0,255)
-  assert(col <= 255)
-  if(node.Dominators.Len() == 0) {
-    fmt.Printf("color=\"#ff0000\"");
-  } else {
-    fmt.Printf("color=\"#00%x00\"", col)
-  }
-  fmt.Printf("];\n");
-
-  for _, edge := range node.Edgelist {
-    fmt.Printf("\t\t\"0x%08x\" -> \"0x%08x\";\n", node.Addr, edge.To.Addr)
-  }
-}
-
-func findNodeByName(graph map[uintptr]*cfg.Node, name string) (*cfg.Node) {
-  seen := make(map[uintptr]bool)
-  for k, v := range graph {
-    node := find_helper(v, seen, name)
-    if node != nil && node.Name == name { return node }
-    seen[k] = true
-  }
-  return nil
-}
-func
-find_helper(node *cfg.Node, seen map[uintptr]bool, name string) (*cfg.Node) {
-  if seen[node.Addr] { return nil }
-  if node.Name == name { return node }
-  seen[node.Addr] = true
-  for _, edge := range node.Edgelist {
-    found := find_helper(edge.To, seen, name)
-    if found != nil && found.Name == name { return found }
-  }
-  return nil
 }
 
 var symlist bool
@@ -204,7 +107,7 @@ func main() {
   }
 
   if execute {
-    instrument(argv)
+    interactive(argv)
   }
   if showmallocs {
     mallocs(argv)
@@ -217,125 +120,13 @@ func main() {
   }
 }
 
-type Command interface{
-  Execute(*ptrace.Tracee) (error)
-}
-type cgeneric struct {
-  args []string
-}
-func (c cgeneric) Execute(proc *ptrace.Tracee) (error) {
-  fmt.Printf("cmd: %s\n", c.args)
-  return nil
-}
-type ccontinue struct {
-  args []string
-}
-type cparseerror struct {}
-func (c cparseerror) Execute(proc *ptrace.Tracee) (error) {
-  fmt.Fprintf(os.Stderr, "error parsing command.\n")
-  return errors.New("Parsing")
-}
-func (c ccontinue) Execute(proc *ptrace.Tracee) (error) {
-  fmt.Printf("continuing ... %v\n", c.args)
-  err := proc.Continue()
-  return err
-}
-type cstep struct{} // needs no args.
-func (c cstep) Execute(proc *ptrace.Tracee) (error) {
-  err := proc.SingleStep()
-  return err
-}
-type cstop struct{}
-func (c cstop) Execute(proc *ptrace.Tracee) (error) {
-  err := proc.SendSignal(syscall.SIGSTOP)
-  return err
-}
-type cpid struct{}
-func (c cpid) Execute(proc *ptrace.Tracee) (error) {
-  fmt.Printf("%d\n", proc.PID())
-  return nil
-}
-type cstatus struct{}
-func (c cstatus) Execute(proc *ptrace.Tracee) (error) {
-
-  fn := fmt.Sprintf("/proc/%d/stat", proc.PID())
-  file, err := os.Open(fn)
-  if err != nil { return err }
-  defer file.Close()
-  var pid int
-  var name string
-  var state rune
-  n, err := fmt.Fscanf(file, "%d %s %c", &pid, &name, &state)
-  if err != nil { return err }
-  if n <= 1 {
-    return errors.New("could not scan enough")
-  }
-  fmt.Printf("process %d is ", proc.PID())
-  switch(state) {
-    case 'D': fmt.Printf("uninterruptible sleep (io?)\n"); break
-    case 'R': fmt.Printf("running\n"); break
-    case 'S': fmt.Printf("sleeping\n"); break
-    case 't': fmt.Printf("stopped (tracing)\n"); break
-    case 'W': fmt.Printf("(impossibly) paging\n"); break
-    case 'X': fmt.Printf("(impossibly) dead\n"); break
-    case 'Z': fmt.Printf("awaits reaping.\n"); break
-    default: fmt.Printf("unknown?!\n"); break
-  }
-  return nil
-}
-type cquit struct{}
-func (c cquit) Execute(proc *ptrace.Tracee) (error) {
-  if err := proc.SendSignal(syscall.SIGKILL) ; err != nil {
-    return err
-  }
-  return nil
-}
-
-func parse_cmdline(line string) (Command) {
-  tokens := strings.Split(line, " ")
-  if len(tokens) == 0 { return cparseerror{} }
-  switch(tokens[0]) {
-    case "cont": fallthrough
-    case "continue": return ccontinue{tokens[1:len(tokens)]}
-    case "pid": return cpid{}
-    case "quit": fallthrough
-    case "exit": return cquit{}
-    case "stat": fallthrough
-    case "status": return cstatus{}
-    case "step": return cstep{}
-    case "break": return cstop{} // opposite of 'continue' :-)
-    default: return cgeneric{tokens}
-  }
-}
-func commands() (chan Command) {
-  cmds := make(chan Command)
-  go func() {
-    rdr := bufio.NewReader(os.Stdin)
-    for {
-      <- cmds // wait for 'green light' from our parent.
-      fmt.Printf("> ")
-      os.Stdout.Sync()
-      s, err := rdr.ReadString('\n')
-      if err != nil {
-        fmt.Fprintf(os.Stderr, "error scanning line: %v\n", err)
-        cmds <- nil // signal EOF.
-        close(cmds)
-        return
-      }
-      cmd := parse_cmdline(strings.TrimSpace(s))
-      cmds <- cmd
-    }
-  }()
-  return cmds
-}
-
-func instrument(argv []string) {
+func interactive(argv []string) {
   proc, err := ptrace.Exec(argv[0], argv)
   if err != nil {
     log.Fatalf("could not start program: %v\n", err)
   }
 
-  cmds := commands()
+  cmds := Commands()
 
   events := proc.Events()
   fmt.Println("Please state the nature of the debugging emergency.")
@@ -373,33 +164,20 @@ func symbol(symname string, symbols []bfd.Symbol) *bfd.Symbol {
   return nil
 }
 
-func whereis(inferior *ptrace.Tracee) uintptr {
-  iptr, err := inferior.GetIPtr()
-  if err != nil { log.Fatalf("get insn ptr failed: %v\n", err) }
-
-  return iptr
-}
-
-func sstep(inferior *ptrace.Tracee) {
-  if err := inferior.SingleStep() ; err != nil {
-    log.Fatalf("could not step through call: %v", err)
-  }
-
-  stat := <- inferior.Events() // eat the trap we get from single stepping
-  status := stat.(syscall.WaitStatus)
-  if !status.Stopped() || status.StopSignal() != syscall.SIGTRAP {
-    procstatus(inferior.PID(), status)
-    log.Fatalf("expecting sigtrap, got %d instead!", status)
-  }
-}
-
 func iptr(inf *ptrace.Tracee) uintptr {
   addr, err := inf.GetIPtr()
   if err != nil { log.Fatalf(err.Error()) }
   return addr
 }
 
-func mainsync(program string, inferior *ptrace.Tracee) error {
+// Lets the inferior run until it hits 'main'.  We mostly use this to bypass
+// all the application startup stuff (e.g. loading libc).  Afterwards, we can
+// read symbols from the process and they'll have valid addresses.
+// The loader has some special breakpoint hooks that we *should* use for
+// identifying loaded and unloaded libraries.  This would allow us to account
+// for libraries loaded at runtime (i.e. via dlopen), for example.  Currently
+// we don't bother.
+func MainSync(program string, inferior *ptrace.Tracee) error {
   symbols, err := bfd.Symbols(program)
   if err != nil { return err }
 
@@ -418,26 +196,6 @@ func mainsync(program string, inferior *ptrace.Tracee) error {
 
   // now we're at main and the program is stopped.
   return nil
-}
-
-func eatstatus(stat ptrace.Event) {
-  status := stat.(syscall.WaitStatus)
-  fmt.Printf("[go] eating ")
-  if status.Stopped() { fmt.Println("'stop' event") }
-  if status.Continued() { fmt.Println("'continue' event") }
-  if status.Signaled() { fmt.Printf("'%v' signal\n", status.Signal()) }
-  if status.Exited() { fmt.Printf("exited event.\n") }
-}
-
-func rspchecks(inferior *ptrace.Tracee) {
-  regs, err := inferior.GetRegs()
-  if(err != nil) { log.Fatalf(err.Error()) }
-
-  for i:=uint64(0); i < 2; i++ {
-    deref, err := inferior.ReadWord(uintptr(regs.Rsp+(i*8)))
-    if err != nil { log.Fatalf(err.Error()) }
-    fmt.Printf("[go] rsp-%d (0x%0x): 0x%0x\n", i*8, regs.Rsp+(i*8), deref)
-  }
 }
 
 // A StackReader reads information from the inferior's stack.  This is used for
@@ -489,7 +247,7 @@ func mallocs(argv []string) {
   <- inferior.Events() // eat initial 'process is starting' notification.
   defer inferior.Close()
 
-  mainsync(argv[0], inferior)
+  MainSync(argv[0], inferior)
 
   symbols, err := bfd.SymbolsProcess(inferior)
   if err != nil {
@@ -521,65 +279,8 @@ func mallocs(argv []string) {
 
     err = debug.WaitUntil(inferior, retsite)
     fmt.Printf("0x%08x\n", uintptr(stk.RetVal(inferior)))
-
-    if(false) {
-    //  *RSP is where the call returns to.  RDI
-    // has the first integer argument, as per the x86-64 ABI.
-    // Let's set a breakpoint on the return site.  After malloc returns, we can
-    // pull the return value from RAX (again, see the x86-64 ABI)
-    regs, err := inferior.GetRegs()
-    if err != nil { log.Fatalf(err.Error()) }
-    nbytes := regs.Rdi // malloc's argument, an integer, goes in RDI.
-    // the address at *RSP is where the code will return to.
-    retsite, err := inferior.ReadWord(uintptr(regs.Rsp))
-    if err != nil { log.Fatalf(err.Error()) }
-    fmt.Printf("[go] malloc(%4d) -> ", nbytes)
-
-    err = debug.WaitUntil(inferior, uintptr(retsite))
-    if err != nil { log.Fatalf(err.Error()) }
-    regs, err = inferior.GetRegs()
-    if err != nil { log.Fatalf(err.Error()) }
-    fmt.Printf("0x%08x\n", regs.Rax)
-    }
   }
   fmt.Printf("[go] inferior (%d) terminated.\n", inferior.PID())
-}
-
-func print_symbol_info(inferior *ptrace.Tracee) {
-  symbols, err := bfd.SymbolsProcess(inferior)
-  if err != nil {
-    log.Fatalf("could not read inferior's symbols: %v\n", err)
-  }
-  symmalloc := symbol("malloc", symbols)
-  if symmalloc == nil { log.Fatalf("could not find malloc symbol") }
-
-  n := 0
-  for _, v := range symbols {
-    if v.Name() == "malloc" {
-      n++
-      fmt.Printf("malloc @ 0x%0x\n", v.Address())
-    }
-  }
-  fmt.Printf("There are %d 'malloc's in the symbol table.\n", n)
-  symcalloc := symbol("calloc", symbols)
-  if symcalloc == nil { log.Fatalf("could not find calloc symbol") }
-  fmt.Printf("calloc is at: 0x%x\n", symcalloc.Address())
-  fmt.Printf("malloc is at: 0x%x\n", symmalloc.Address())
-}
-
-func print_address_info(argv []string) {
-  var pid int
-  fmt.Sscanf(argv[0], "%d", &pid)
-  fmt.Printf("attaching to %d\n", pid)
-  inferior, err := ptrace.Attach(pid)
-  if err != nil {
-    log.Fatalf("could not start program: %v", err)
-  }
-  eatstatus(<-inferior.Events()) // 'process stopped' due to attach.
-  print_symbol_info(inferior)
-
-  inferior.Detach()
-  inferior.Close()
 }
 
 // A process / shared library leaves some free space after it's loaded.  This
@@ -606,13 +307,11 @@ func free_space_address(pid int) (uintptr, error) {
     var device string
     var inode uint
     _, err = fmt.Sscanf(line, "%x-%x %s %s %s %d", &addr, &junkaddr, &junk,
-      &junk, &device, &inode)
-    if err == io.EOF {
-      return addr, nil
-    }
-    if err != nil {
-      return 0x0, err
-    }
+                        &junk, &device, &inode)
+    // err could be EOF.  That means there's no free space.  Grumble.
+    // But it seems libc has some free space, so we probably don't need to
+    // worry about that in practice.
+    if err != nil { return 0x0, err }
 
     if device == "00:00" && inode == 0 {
       break
@@ -621,30 +320,23 @@ func free_space_address(pid int) (uintptr, error) {
   return addr, nil
 }
 
-// prints out the contents of the given process' maps.  used for debugging
-// free_space_address.
-func viewmaps(pid int) {
-  filename := fmt.Sprintf("/proc/%d/maps", pid)
-  maps, err := os.Open(filename)
-  if err != nil {
-    panic(err)
-  }
-  defer maps.Close()
-
-  scanner := bufio.NewScanner(maps)
-  for scanner.Scan() {
-    fmt.Println(scanner.Text())
-  }
-}
-
 // temp hack for testing free space stuff
 func show_free_space(argv []string) {
   inferior, err := ptrace.Exec(argv[0], argv)
   if err != nil {
     log.Fatalf("could not start program '%v': %v\n", argv, err)
   }
+  defer inferior.Close()
   <-inferior.Events() // eat initial 'process is starting' notification.
-  mainsync(argv[0], inferior) // run until we hit main, then pause.
+  MainSync(argv[0], inferior) // run until we hit main, then pause.
+
+  symbols, err := bfd.SymbolsProcess(inferior)
+  if err != nil { log.Fatalf("could not read smbols: %v\n", err) }
+
+  // these symbols are part of libc; if they're not there, i can't imagine we'd
+  // have made it here.
+  assert(symbol("getpagesize", symbols) != nil)
+  assert(symbol("posix_memalign", symbols) != nil)
 
   fspace_addr(inferior.PID())
   inferior.Close()
