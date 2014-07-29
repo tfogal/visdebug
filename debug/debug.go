@@ -56,7 +56,3 @@ func StartUnderOurPurview(program string, arguments []string) (*os.Process, erro
 func Watch(addr *uint8) (error) {
   return errors.New("unimplemented");
 }
-
-func breakpoint(addr *uint8) (error) {
-  return errors.New("unimplemented");
-}
