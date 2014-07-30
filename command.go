@@ -6,6 +6,7 @@ import "errors"
 import "fmt"
 import "os"
 import "syscall"
+import "strconv"
 import "strings"
 import "github.com/tfogal/ptrace"
 import "./bfd"
@@ -141,6 +142,25 @@ func (c csymbol) Execute(inferior *ptrace.Tracee) (error) {
   fmt.Printf("'%s' is at 0x%012x\n", sym.Name(), sym.Address())
   return nil
 }
+type cderef struct {
+  addr string // really, a uintptr, but do the parsing in the command.
+}
+func (c cderef) Execute(inferior *ptrace.Tracee) (error) {
+  if c.addr == "" {
+    return errors.New("empty address given")
+  }
+  ui, err := strconv.ParseUint(c.addr, 0, 64)
+  if err != nil { return err }
+  address := uintptr(ui)
+
+  fmt.Printf("addr: 0x%0x\n", address)
+
+  word, err := inferior.ReadWord(address)
+  if err != nil { return err }
+
+  fmt.Printf("0x%0x\n", word)
+  return nil
+}
 
 func parse_cmdline(line string) (Command) {
   tokens := strings.Split(line, " ")
@@ -153,6 +173,7 @@ func parse_cmdline(line string) (Command) {
     case "exit": return cquit{}
     case "stat": fallthrough
     case "status": return cstatus{}
+    case "stepi": fallthrough
     case "step": return cstep{}
     case "break": return cstop{} // opposite of 'continue' :-)
     case "wait":
@@ -164,6 +185,9 @@ func parse_cmdline(line string) (Command) {
     case "symbol":
       if len(tokens) == 1 { return cparseerror{"not enough arguments"} }
       return csymbol{tokens[1]}
+    case "deref":
+      if len(tokens) == 1 { return cparseerror{"not enough arguments"} }
+      return cderef{tokens[1]}
     default: return cgeneric{tokens}
   }
 }
