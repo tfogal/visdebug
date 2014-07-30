@@ -27,6 +27,7 @@ func verify_symbols_loaded(inferior *ptrace.Tracee) error {
 type Command interface{
   Execute(*ptrace.Tracee) (error)
 }
+
 type cgeneric struct {
   args []string
 }
@@ -34,6 +35,7 @@ func (c cgeneric) Execute(proc *ptrace.Tracee) (error) {
   fmt.Printf("unknown cmd: %s\n", c.args)
   return nil
 }
+
 type ccontinue struct {
   args []string
 }
@@ -42,21 +44,25 @@ func (c ccontinue) Execute(proc *ptrace.Tracee) (error) {
   err := proc.Continue()
   return err
 }
+
 type cstep struct{} // needs no args.
 func (c cstep) Execute(proc *ptrace.Tracee) (error) {
   err := proc.SingleStep()
   return err
 }
+
 type cstop struct{}
 func (c cstop) Execute(proc *ptrace.Tracee) (error) {
   err := proc.SendSignal(syscall.SIGSTOP)
   return err
 }
+
 type cpid struct{}
 func (c cpid) Execute(proc *ptrace.Tracee) (error) {
   fmt.Printf("%d\n", proc.PID())
   return nil
 }
+
 type cstatus struct{}
 func (c cstatus) Execute(proc *ptrace.Tracee) (error) {
   fn := fmt.Sprintf("/proc/%d/stat", proc.PID())
@@ -84,6 +90,7 @@ func (c cstatus) Execute(proc *ptrace.Tracee) (error) {
   }
   return nil
 }
+
 type cquit struct{}
 func (c cquit) Execute(proc *ptrace.Tracee) (error) {
   if err := proc.SendSignal(syscall.SIGKILL) ; err != nil {
@@ -91,6 +98,7 @@ func (c cquit) Execute(proc *ptrace.Tracee) (error) {
   }
   return nil
 }
+
 type cwait struct{
   funcname string
 }
@@ -107,12 +115,14 @@ func (c cwait) Execute(inferior *ptrace.Tracee) (error) {
   fmt.Printf("Hit BP!\n")
   return nil
 }
+
 type cparseerror struct{
   reason string
 }
 func (c cparseerror) Execute(*ptrace.Tracee) (error) {
   return fmt.Errorf("parse error: %s", c.reason)
 }
+
 type cregisters struct{}
 func (cregisters) Execute(inferior *ptrace.Tracee) (error) {
   regs, err := inferior.GetRegs()
@@ -127,6 +137,7 @@ func (cregisters) Execute(inferior *ptrace.Tracee) (error) {
              regs.Rbp, regs.Rsp, wd)
   return nil
 }
+
 type csymbol struct{
   symname string
 }
@@ -142,6 +153,7 @@ func (c csymbol) Execute(inferior *ptrace.Tracee) (error) {
   fmt.Printf("'%s' is at 0x%012x\n", sym.Name(), sym.Address())
   return nil
 }
+
 type cderef struct {
   addr string // really, a uintptr, but do the parsing in the command.
 }
