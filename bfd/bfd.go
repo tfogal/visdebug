@@ -126,9 +126,14 @@ func (s SymList) Len() int { return len(s); }
 func (s SymList) Less(i int, j int) bool { return s[i].name < s[j].name }
 func (s SymList) Swap(i int, j int) { s[i], s[j] = s[j], s[i] }
 
+// Returns the symbols for a binary.  These are only for the binary itself, not
+// a running process, so the list is not exhaustive.  It will have PLT entries
+// for functions called in other libraries, but those symbols' addresses will
+// be nonsense.
 func Symbols(executable string) ([]Symbol, error) {
   binary, err := elf.Open(executable)
   if err != nil { return nil, err }
+  defer binary.Close()
 
   syms, err := binary.Symbols()
   if err != nil { return nil, err }
@@ -148,7 +153,7 @@ func Symbols(executable string) ([]Symbol, error) {
     symbols = append(symbols, s)
   }
 
-  binary.Close()
+  sort.Sort(SymList(symbols))
   return symbols, nil
 }
 
