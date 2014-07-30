@@ -126,6 +126,8 @@ func interactive(argv []string) {
   if err != nil {
     log.Fatalf("could not start program: %v\n", err)
   }
+  defer proc.Close()
+  MainSync(argv[0], proc)
 
   cmds := Commands()
 
@@ -137,17 +139,25 @@ func interactive(argv []string) {
     select {
       case status := <-events:
         if status == nil {
-          proc.Close()
           close(cmds)
           return
         }
-        if status.(syscall.WaitStatus).Exited() {
+        s := status.(syscall.WaitStatus)
+        if s.Exited() {
           fmt.Println("\nprogram terminated.")
-          proc.Close()
+          close(cmds)
+          return
+        }
+        if s.Signaled() {
+          fmt.Printf("\nprogram terminated by signal %d\n", s.Signal())
           close(cmds)
           return
         }
       case cmd := <-cmds:
+        if cmd == nil {
+          fmt.Println("\nEOF, terminating.")
+          return
+        }
         if err := cmd.Execute(proc) ; err != nil {
           fmt.Fprintf(os.Stderr, "error executing command: %v\n", err)
         }

@@ -8,6 +8,20 @@ import "os"
 import "syscall"
 import "strings"
 import "github.com/tfogal/ptrace"
+import "./bfd"
+import "./debug"
+
+// the list of symbols from the process, might be nil.
+var symbols []bfd.Symbol
+
+func verify_symbols_loaded(inferior *ptrace.Tracee) error {
+  if symbols == nil {
+    var err error // so we can use "=" and ensure 'symbols' is the global.
+    symbols, err = bfd.SymbolsProcess(inferior)
+    if err != nil { return err }
+  }
+  return nil
+}
 
 type Command interface{
   Execute(*ptrace.Tracee) (error)
@@ -16,16 +30,11 @@ type cgeneric struct {
   args []string
 }
 func (c cgeneric) Execute(proc *ptrace.Tracee) (error) {
-  fmt.Printf("cmd: %s\n", c.args)
+  fmt.Printf("unknown cmd: %s\n", c.args)
   return nil
 }
 type ccontinue struct {
   args []string
-}
-type cparseerror struct {}
-func (c cparseerror) Execute(proc *ptrace.Tracee) (error) {
-  fmt.Fprintf(os.Stderr, "error parsing command.\n")
-  return errors.New("Parsing")
 }
 func (c ccontinue) Execute(proc *ptrace.Tracee) (error) {
   fmt.Printf("continuing ... %v\n", c.args)
@@ -81,10 +90,61 @@ func (c cquit) Execute(proc *ptrace.Tracee) (error) {
   }
   return nil
 }
+type cwait struct{
+  funcname string
+}
+func (c cwait) Execute(inferior *ptrace.Tracee) (error) {
+  if err := verify_symbols_loaded(inferior) ; err != nil {
+    return err
+  }
+  sym := symbol(c.funcname, symbols) // symbol lookup
+  if sym == nil {
+    return fmt.Errorf("could not find '%s' among the %d known symbols.\n",
+                      c.funcname, len(symbols))
+  }
+  debug.WaitUntil(inferior, sym.Address())
+  fmt.Printf("Hit BP!\n")
+  return nil
+}
+type cparseerror struct{
+  reason string
+}
+func (c cparseerror) Execute(*ptrace.Tracee) (error) {
+  return fmt.Errorf("parse error: %s", c.reason)
+}
+type cregisters struct{}
+func (cregisters) Execute(inferior *ptrace.Tracee) (error) {
+  regs, err := inferior.GetRegs()
+  if err != nil { return err }
+
+  wd, err := inferior.ReadWord(uintptr(regs.Rip))
+  if err != nil { return err }
+
+  fmt.Printf("%9s %14s %14s %13s %21s\n", "iptr", "RAX", "RBP", "RSP",
+             "next-opcode")
+  fmt.Printf("0x%012x 0x%012x 0x%012x 0x%012x 0x%012x\n", regs.Rip, regs.Rax,
+             regs.Rbp, regs.Rsp, wd)
+  return nil
+}
+type csymbol struct{
+  symname string
+}
+func (c csymbol) Execute(inferior *ptrace.Tracee) (error) {
+  if err := verify_symbols_loaded(inferior) ; err != nil {
+    return err
+  }
+  sym := symbol(c.symname, symbols) // symbol lookup
+  if sym == nil {
+    return fmt.Errorf("could not find '%s' among the %d known symbols.\n",
+                      c.symname, len(symbols))
+  }
+  fmt.Printf("'%s' is at 0x%012x\n", sym.Name(), sym.Address())
+  return nil
+}
 
 func parse_cmdline(line string) (Command) {
   tokens := strings.Split(line, " ")
-  if len(tokens) == 0 { return cparseerror{} }
+  if len(tokens) == 0 { return cparseerror{"no tokens"} }
   switch(tokens[0]) {
     case "cont": fallthrough
     case "continue": return ccontinue{tokens[1:len(tokens)]}
@@ -95,12 +155,22 @@ func parse_cmdline(line string) (Command) {
     case "status": return cstatus{}
     case "step": return cstep{}
     case "break": return cstop{} // opposite of 'continue' :-)
+    case "wait":
+      if len(tokens) == 1 { return cparseerror{"not enough arguments"} }
+      return cwait{tokens[1]}
+    case "regs": fallthrough
+    case "registers": return cregisters{}
+    case "sym": fallthrough
+    case "symbol":
+      if len(tokens) == 1 { return cparseerror{"not enough arguments"} }
+      return csymbol{tokens[1]}
     default: return cgeneric{tokens}
   }
 }
 func Commands() (chan Command) {
   cmds := make(chan Command)
   go func() {
+    defer close(cmds)
     rdr := bufio.NewReader(os.Stdin)
     for {
       <- cmds // wait for 'green light' from our parent.
@@ -110,7 +180,6 @@ func Commands() (chan Command) {
       if err != nil {
         fmt.Fprintf(os.Stderr, "error scanning line: %v\n", err)
         cmds <- nil // signal EOF.
-        close(cmds)
         return
       }
       cmd := parse_cmdline(strings.TrimSpace(s))
