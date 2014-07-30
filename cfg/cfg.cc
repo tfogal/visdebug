@@ -23,6 +23,7 @@ static void free_nodes(struct node* nds, size_t nodes);
 static bool filter = false;
 /* produce a dot-format output instead of a default custom output? */
 static bool dot = false;
+const char* local = NULL;
 
 int
 main(int argc, char* argv[])
@@ -31,13 +32,19 @@ main(int argc, char* argv[])
   for(int a=1; a < argc; a++) {
     if(strcmp(argv[a], "-dot") == 0) { dot = true; }
     if(strcmp(argv[a], "-filter") == 0) { filter = true; }
+    if(strcmp(argv[a], "-local") == 0) { local = argv[a+1]; }
   }
 
   if(dot) {
     printdot(argv[1]);
   } else {
     size_t nodes;
-    struct node* nds = cfg(argv[1], &nodes);
+    struct node* nds;
+    if(local == NULL) {
+      nds = cfg(argv[1], &nodes);
+    } else {
+      nds = cfgLocal(argv[1], local, &nodes);
+    }
     print_nodes(nds, nodes);
     free_nodes(nds, nodes);
   }
@@ -76,19 +83,20 @@ free_nodes(struct node* nds, size_t nodes)
 }
 #endif
 
-/* predicate for filtering functions we don't care about.  if it returns true,
- * we want to process that function. */
-static bool functionp(/*const*/ Function* f) {
-  return !f->name().empty() &&
-          f->name().front() != '_';
+/* predicate for "internal" functions, garbage symbols/fqns that exist in the
+ * symbol table but don't actually represent anything of merit. */
+static bool internalfqn(/*const*/ Function* f) {
+  return f->name().empty() ||
+         f->name().front() == '_';
 }
 
 PURE
-static size_t nblocks(const CodeObject::funclist& fqns) {
+static size_t nblocks(const CodeObject::funclist& fqns,
+                      const std::function<bool(Function*)>& filter) {
   std::map<Address, bool> seen;
   size_t blocks = 0;
   for(auto fqn : fqns) {
-    if(!functionp(fqn)) { continue; }
+    if(filter(fqn)) { continue; }
     for(const Block* blk : fqn->blocks()) {
       assert(blk->start() != 0x0);
       // don't get stuck in loops
@@ -100,8 +108,10 @@ static size_t nblocks(const CodeObject::funclist& fqns) {
   return blocks;
 }
 
-extern "C" struct node*
-cfg(const char* program, size_t* n_nodes)
+// builds the CFG, but ignores functions which pass the predicate.
+static struct node*
+cfg_filter(const char* program, std::function<bool(Function*)>& filter,
+           size_t* n_nodes)
 {
   if(n_nodes == NULL || program == NULL) { errno = EINVAL; return NULL; }
 
@@ -122,16 +132,16 @@ cfg(const char* program, size_t* n_nodes)
   const CodeObject::funclist& all = co->funcs();
   // use malloc to allocate so Go can use free.
   constexpr size_t sznode = sizeof(struct node);
-  struct node* nodes = (struct node*)calloc(nblocks(all), sznode);
+  struct node* nodes = (struct node*)calloc(nblocks(all, filter), sznode);
   if(nodes == NULL) {
     errno = ENOMEM;
     *n_nodes = 0;
     return NULL;
   }
-  *n_nodes = nblocks(all);
+  *n_nodes = nblocks(all, filter);
   size_t n=0; // we also need an index into the nodes.
   for(auto fqn : all) {
-    if(!functionp(fqn)) { continue; }
+    if(filter(fqn)) { continue; }
 
     for(const Block* blk : fqn->blocks()) {
       assert(blk->start() != 0x0);
@@ -164,6 +174,29 @@ cfg(const char* program, size_t* n_nodes)
   return nodes;
 }
 
+extern "C" struct node*
+cfg(const char* program, size_t* n_nodes)
+{
+  std::function<bool(Function*)> f = internalfqn;
+  return cfg_filter(program, f, n_nodes);
+}
+
+// Like 'cfg' but only builds the CFG for a local graph.
+EXTC struct node*
+cfgLocal(const char* program, const char* function, size_t* n_nodes)
+{
+  // This is unfortunately not great; we just create a predicate that
+  // matches the name of the function that DynInst finds.  So, DynInst
+  // is probably still *building* the full CFG for basic blocks outside
+  // the given function, and we're just filtering it out.  Oh well, we
+  // acquiesce for now, since there doesn't seem to be a way around it
+  // without hacking DynInst.
+  std::function<bool(Function*)> f = [&](Function* fqn) {
+    return internalfqn(fqn) || fqn->name() != std::string(function);
+  };
+  return cfg_filter(program, f, n_nodes);
+}
+
 #ifdef MAIN
 /* functions to remove/ignore. */
 static const std::array<std::string,7> ignored = {
@@ -191,15 +224,14 @@ printdot(const char* program)
   auto fit = all.begin();
   for(int i = 0; fit != all.end(); ++fit, i++) { // i is index for clusters
     /*const*/ Function *f = *fit;
-    // Filtering: skip unnamed blocks
-    if(f->name().empty()) { continue; }
-    //            blocks with names starting with _ are the runtime's.
-    if(f->name().front() == '_') { continue; }
+    if(internalfqn(f)) { continue; }
     // skip any functions in our list of ignored functions.
     if(filter && std::count_if(ignored.begin(), ignored.end(),
        [&](const std::string& s) { return s == f->name(); }) > 0) {
       continue;
     }
+    // if producing a local CFG, skip functions that don't match the name.
+    if(local && f->name() != std::string(local)) { continue; }
 
     // Make a cluster for nodes of this function
     cout << "\t subgraph cluster_" << i

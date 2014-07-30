@@ -24,5 +24,7 @@ struct node {
 };
 
 EXTC struct node* cfg(const char* program, size_t* n_nodes);
+EXTC struct node* cfgLocal(const char* program, const char* function,
+                           size_t* n_nodes);
 
 #endif
