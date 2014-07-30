@@ -12,8 +12,14 @@ import "github.com/tfogal/ptrace"
 import "./bfd"
 import "./debug"
 
+type CmdGlobal struct {
+  program string
+}
+
 // the list of symbols from the process, might be nil.
 var symbols []bfd.Symbol
+// initialization info that commands might want to use.
+var globals CmdGlobal
 
 func verify_symbols_loaded(inferior *ptrace.Tracee) error {
   if symbols == nil {
@@ -203,7 +209,8 @@ func parse_cmdline(line string) (Command) {
     default: return cgeneric{tokens}
   }
 }
-func Commands() (chan Command) {
+func Commands(gbl CmdGlobal) (chan Command) {
+  globals = gbl
   cmds := make(chan Command)
   go func() {
     defer close(cmds)

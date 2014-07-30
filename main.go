@@ -129,7 +129,7 @@ func interactive(argv []string) {
   defer proc.Close()
   MainSync(argv[0], proc)
 
-  cmds := Commands()
+  cmds := Commands(CmdGlobal{argv[0]})
 
   events := proc.Events()
   fmt.Println("Please state the nature of the debugging emergency.")
