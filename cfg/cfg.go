@@ -57,7 +57,7 @@ func assert(conditional bool) {
 // Computes the control flow graph for the given program and returns it.  Does
 // some basic filtering to get rid 'internal' symbols.
 // Note that this memleaks a bit!  Do not call in a loop.
-func CFG(program string) (map[uintptr]*Node) {
+func Build(program string) (map[uintptr]*Node) {
   var c_nnodes C.size_t
   progname := C.CString(program);
   ccfg := C.cfg(progname, &c_nnodes);

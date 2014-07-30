@@ -98,7 +98,7 @@ func main() {
   }
 
   if(dotcfg) {
-    graph := cfg.CFG(argv[0])
+    graph := cfg.Build(argv[0])
     root := findNodeByName(graph, "main")
     assert(root != nil)
     cfg.Dominance(root)
