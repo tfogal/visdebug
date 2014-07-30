@@ -54,16 +54,8 @@ func assert(conditional bool) {
   if false == conditional { panic("assertion failure") }
 }
 
-// Computes the control flow graph for the given program and returns it.  Does
-// some basic filtering to get rid 'internal' symbols.
-// Note that this memleaks a bit!  Do not call in a loop.
-func Build(program string) (map[uintptr]*Node) {
-  var c_nnodes C.size_t
-  progname := C.CString(program);
-  ccfg := C.cfg(progname, &c_nnodes);
-  C.free(unsafe.Pointer(progname))
-  nnodes := uint(c_nnodes)
-
+// converts the C graph structure into a Go graph structure
+func go_graph(ccfg *C.struct_node, nnodes uint) (map[uintptr]*Node) {
   var gocfg []C.struct_node
   header := (*reflect.SliceHeader)(unsafe.Pointer(&gocfg))
   header.Cap = int(nnodes)
@@ -117,6 +109,32 @@ func Build(program string) (map[uintptr]*Node) {
   C.free(unsafe.Pointer(ccfg))
 
   return cfg
+}
+
+// Computes the control flow graph for the given program and returns it.  Does
+// some basic filtering to get rid 'internal' symbols.
+// Note that this memleaks a bit (C++ lib is broken)!  Do not call in a loop.
+func Build(program string) (map[uintptr]*Node) {
+  var c_nnodes C.size_t
+  progname := C.CString(program);
+  ccfg := C.cfg(progname, &c_nnodes);
+  C.free(unsafe.Pointer(progname))
+  nnodes := uint(c_nnodes)
+  return go_graph(ccfg, nnodes)
+}
+
+// Computes the LOCAL (to a function) control flow graph.
+// todo: return a single node? a single function should only have one entry.
+// Note that this memleaks a bit (C++ lib is broken)!  Do not call in a loop.
+func Local(program string, function string) (map[uintptr]*Node) {
+  var c_nnodes C.size_t
+  progname := C.CString(program);
+  funcname := C.CString(function)
+  ccfg := C.cfgLocal(progname, funcname, &c_nnodes)
+  C.free(unsafe.Pointer(progname))
+  C.free(unsafe.Pointer(funcname))
+  nnodes := uint(c_nnodes)
+  return go_graph(ccfg, nnodes)
 }
 
 // returns true if the node 'target' is reachable from 'from'.
