@@ -13,7 +13,10 @@ import "reflect"
 import "unsafe"
 
 const(
-  cfg_INLOOP = (1 << 0)
+  INLOOP =      (1 << 0)
+  LOOP_HEADER = (1 << 1)
+  ENTRY =       (1 << 2)
+  EXIT =        (1 << 3)
 )
 
 // set for keeping track of per-node dominance.  all corresponding functions
@@ -143,6 +146,7 @@ func Reachable(target *Node, from *Node) (bool) {
   return reachable(target, from, seen)
 }
 
+// internal helper function for 'Reachable'.
 func reachable(target *Node, from *Node, seen map[uintptr]bool) (bool) {
   if seen[from.Addr] { return false }
   seen[from.Addr] = true
@@ -163,12 +167,12 @@ func loopcalc(from* Node, seen map[uintptr]bool) {
   seen[from.Addr] = true
   for _, edge := range from.Edgelist {
     if Reachable(from, edge.To) {
-      from.flags |= cfg_INLOOP
+      from.flags |= INLOOP
     }
     loopcalc(edge.To, seen)
   }
 }
-func (n *Node) InLoop() (bool) { return n.flags & cfg_INLOOP > 0 }
+func (n *Node) InLoop() (bool) { return n.flags & INLOOP > 0 }
 
 // counts the number of edges to 'target' from 'source'.  The 'source' edge
 // counts, so this is positive---or unreachable, which gives 0.
@@ -268,6 +272,38 @@ func sameset(a domset, b domset) (bool) {
   return len(intersection(a,b).set) == len(a.set)
 }
 
+// Analyzes a graph, computing all the properties we can.
+func Analyze(root *Node) {
+  Dominance(root)
+}
+
+// an edge with both from and to nodes.  sometimes we need to get in-edges,
+// which is a huge PITA with our current graph structure.
+type BiEdge struct {
+  From, To *Node
+  flags uint
+}
+// creates an alternate representation of the graph rooted at 'root', based
+// solely on the edges.
+func build_edgelist(root *Node) []BiEdge {
+  seen := make(map[uintptr]bool)
+  return build_edgelist_helper(root, seen)
+}
+func build_edgelist_helper(node *Node, seen map[uintptr]bool) []BiEdge {
+  if seen[node.Addr] { return nil }
+  seen[node.Addr] = true
+
+  elist := make([]BiEdge, 0)
+  for _, e := range node.Edgelist {
+    be := BiEdge{From: node, To: e.To, flags: e.flags}
+    elist = append(elist, be)
+
+    el := build_edgelist_helper(e.To, seen)
+    elist = append(elist, el...)
+  }
+  return elist
+}
+
 // calculates the dominance set for every node in the graph.  modifies the
 // graph itself.
 func Dominance(root* Node) {
@@ -303,8 +339,7 @@ func dominance(chld *Node, parent *Node) {
     }
     chld.Dominators = intersection(chld.Dominators, incoming)
   }
-  for _, edge := range chld.Edgelist {
-    // calc dominance of children, and report if they changed, too.
+  for _, edge := range chld.Edgelist { // calc dominance of children
     dominance(edge.To, chld)
   }
 }
