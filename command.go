@@ -5,11 +5,13 @@ import "bufio"
 import "errors"
 import "fmt"
 import "os"
-import "syscall"
+import "sort"
 import "strconv"
 import "strings"
+import "syscall"
 import "github.com/tfogal/ptrace"
 import "./bfd"
+import "./cfg"
 import "./debug"
 
 type CmdGlobal struct {
@@ -114,7 +116,7 @@ func (c cwait) Execute(inferior *ptrace.Tracee) (error) {
   }
   sym := symbol(c.funcname, symbols) // symbol lookup
   if sym == nil {
-    return fmt.Errorf("could not find '%s' among the %d known symbols.\n",
+    return fmt.Errorf("could not find '%s' among the %d known symbols.",
                       c.funcname, len(symbols))
   }
   debug.WaitUntil(inferior, sym.Address())
@@ -153,7 +155,7 @@ func (c csymbol) Execute(inferior *ptrace.Tracee) (error) {
   }
   sym := symbol(c.symname, symbols) // symbol lookup
   if sym == nil {
-    return fmt.Errorf("could not find '%s' among the %d known symbols.\n",
+    return fmt.Errorf("could not find '%s' among the %d known symbols.",
                       c.symname, len(symbols))
   }
   fmt.Printf("'%s' is at 0x%012x\n", sym.Name(), sym.Address())
@@ -177,6 +179,77 @@ func (c cderef) Execute(inferior *ptrace.Tracee) (error) {
   if err != nil { return err }
 
   fmt.Printf("0x%0x\n", word)
+  return nil
+}
+
+// need these to be able to sort symbols on addresses.
+type SymListA []bfd.Symbol
+func (s SymListA) Len() int { return len(s) }
+func (s SymListA) Less(i int, j int) bool {
+	return s[i].Address() < s[j].Address()
+}
+func (s SymListA) Swap(i int, j int) { s[i], s[j] = s[j], s[i] }
+
+type ccfg struct {} // build CFG for local function
+func (ccfg) Execute(inferior *ptrace.Tracee) (error) {
+  regs, err := inferior.GetRegs()
+  if err != nil { return err }
+
+  // Ergh.  We have the instruction pointer, but cfg.Local does its filtering
+  // based on the symbol (really, function) name.  So we search through our
+  // symbtable and "convert" our current insn ptr to a function name.
+  if err = verify_symbols_loaded(inferior) ; err != nil { return err }
+
+  // copy our symlist to a new variable so that we can change the sort order to
+  // be addresses instead of names without mucking up our normal table.
+  addr_syms := make([]bfd.Symbol, len(symbols))
+  copy(addr_syms, symbols)
+  sort.Sort(SymListA(addr_syms))
+
+  // We can't use sort.Search here because we can be in the middle of a
+  // function, and we don't have an entry for every possible address.  We just
+  // want to find the "minimum" address we are in.
+  fidx := 0
+  for i, sy := range addr_syms {
+    if sy.Address() <= uintptr(regs.Rip) { fidx = i }
+    if sy.Address() > uintptr(regs.Rip) { break } // will never find anything
+  }
+  if fidx == len(addr_syms) {
+    return fmt.Errorf("addr 0x%0x not found in %d-symbol list", regs.Rip,
+                      len(addr_syms))
+  }
+  if addr_syms[fidx].Address() == 0x0 {
+    return errors.New("we are near NULL?  I don't believe it, probably a bug.")
+  }
+  if addr_syms[fidx].Name() == "" {
+    return errors.New("insn ptr is in no man's land.")
+  }
+
+  graph := cfg.Local(globals.program, addr_syms[fidx].Name())
+  fmt.Printf("digraph %s {\n", addr_syms[fidx].Name())
+  inorder(graph, dotNode)
+  fmt.Printf("}\n")
+  return nil
+}
+
+// print out the list of known symbols.
+type csymlist struct{}
+func (csymlist) Execute(inferior *ptrace.Tracee) (error) {
+  if err := verify_symbols_loaded(inferior) ; err != nil { return err }
+
+  n := 0
+  for _, s := range symbols {
+    if n+1+len(s.Name()) > 80 {
+      fmt.Printf("\n")
+      n = 0
+    }
+    if s.Name() == "" { continue } // stupid "blank" symbols, WTF are these??
+    nbytes, err := fmt.Printf("%s ", s.Name())
+    if err != nil { return err }
+
+    n += nbytes
+  }
+  fmt.Printf("\n")
   return nil
 }
 
@@ -206,6 +279,9 @@ func parse_cmdline(line string) (Command) {
     case "deref":
       if len(tokens) == 1 { return cparseerror{"not enough arguments"} }
       return cderef{tokens[1]}
+    case "cfg": return ccfg{}
+    case "symlist": fallthrough
+    case "symbols": return csymlist{}
     default: return cgeneric{tokens}
   }
 }
