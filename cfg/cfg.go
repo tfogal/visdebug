@@ -13,9 +13,9 @@ import "reflect"
 import "unsafe"
 
 const(
-  INLOOP =      (1 << 0)
-  LOOP_HEADER = (1 << 1)
-  ENTRY =       (1 << 2)
+  LOOP_HEADER = (1 << 0)
+  LOOP_BODY   = (1 << 1) // body and header are not exclusive (nested loops)
+  ENTRY =       (1 << 2) // entry point of a function
   EXIT =        (1 << 3)
 )
 
@@ -167,12 +167,13 @@ func loopcalc(from* Node, seen map[uintptr]bool) {
   seen[from.Addr] = true
   for _, edge := range from.Edgelist {
     if Reachable(from, edge.To) {
-      from.flags |= INLOOP
+      from.flags |= LOOP_BODY
     }
     loopcalc(edge.To, seen)
   }
 }
-func (n *Node) InLoop() (bool) { return n.flags & INLOOP > 0 }
+func (n *Node) InLoop() bool { return (n.flags & LOOP_BODY) > 0 }
+func (n *Node) LoopHeader() bool { return (n.flags & LOOP_HEADER) > 0 }
 
 // counts the number of edges to 'target' from 'source'.  The 'source' edge
 // counts, so this is positive---or unreachable, which gives 0.
@@ -275,6 +276,7 @@ func sameset(a domset, b domset) (bool) {
 // Analyzes a graph, computing all the properties we can.
 func Analyze(root *Node) {
   Dominance(root)
+  headers(root)
 }
 
 // an edge with both from and to nodes.  sometimes we need to get in-edges,
@@ -302,6 +304,56 @@ func build_edgelist_helper(node *Node, seen map[uintptr]bool) []BiEdge {
     elist = append(elist, el...)
   }
   return elist
+}
+
+// iterates through the graph, identifying which basic blocks are loop headers.
+// returns nothing: modifies the graph's flags.
+func headers(root *Node) {
+  elist := build_edgelist(root)
+  seen := make(map[uintptr]bool)
+  headers_helper(root, seen, elist)
+}
+func headers_helper(node *Node, seen map[uintptr]bool, elist []BiEdge) {
+  if seen[node.Addr] { return }
+  seen[node.Addr] = true
+
+  // a loop header is a basic block with 2 in-edges and 2 out-edges that is
+  // reachable from one or both of those out-edges.
+  // TODO: switch statements seem to produce duplicate BS edges; we will need
+  // to filter those out for this analysis to be valid.
+  // TODO: above definition is invalid in the presence of gotos.  Do we care?
+  in, out := in_edges(node, elist), out_edges(node, elist)
+  if in == 2 && out == 2 {
+    if Reachable(node, node.Edgelist[0].To) ||
+       Reachable(node, node.Edgelist[1].To) {
+      node.flags |= LOOP_HEADER
+    }
+  }
+  for _, e := range node.Edgelist { // recurse.
+    headers_helper(e.To, seen, elist)
+  }
+}
+
+// counts the number of edges which lead in to 'node'.
+func in_edges(node *Node, elist []BiEdge) uint {
+  n := uint(0)
+  for _, e := range elist {
+    if e.To == node { n++ }
+  }
+  return n
+}
+// counts the number of edges which lead out of 'node'.
+func out_edges(node *Node, elist []BiEdge) uint {
+  n := uint(0)
+  for _, e := range elist {
+    if e.From == node { n++ }
+  }
+  // we don't actually need 'elist' for this.  But it's a good check to make
+  // sure it has the right number of edges in it.
+  if n != uint(len(node.Edgelist)) {
+    panic("number of edges differs; build_edgelist is probably broken.")
+  }
+  return n
 }
 
 // calculates the dominance set for every node in the graph.  modifies the
