@@ -38,9 +38,10 @@ type Node struct {
   Edgelist []*Edge
   flags uint
   Dominators domset
+  depth uint
 }
 func mkNode(name string, addr uintptr) (*Node) {
-  return &Node{name, addr, nil, 0, nullset()}
+  return &Node{name, addr, nil, 0, nullset(), 0}
 }
 
 func (n *Node) String() string {
@@ -174,6 +175,8 @@ func loopcalc(from* Node, seen map[uintptr]bool) {
 }
 func (n *Node) InLoop() bool { return (n.flags & LOOP_BODY) > 0 }
 func (n *Node) LoopHeader() bool { return (n.flags & LOOP_HEADER) > 0 }
+// returns the loop depth that the basic block is in.
+func (n *Node) Depth() uint { return n.depth }
 
 // counts the number of edges to 'target' from 'source'.  The 'source' edge
 // counts, so this is positive---or unreachable, which gives 0.
@@ -277,6 +280,7 @@ func sameset(a domset, b domset) (bool) {
 func Analyze(root *Node) {
   Dominance(root)
   headers(root)
+  depth(root)
 }
 
 // an edge with both from and to nodes.  sometimes we need to get in-edges,
@@ -354,6 +358,49 @@ func out_edges(node *Node, elist []BiEdge) uint {
     panic("number of edges differs; build_edgelist is probably broken.")
   }
   return n
+}
+
+// calculates the depth of each basic block.  requires dominance sets to have
+// already been computed!
+func depth(root *Node) {
+  seen := make(map[uintptr]bool)
+  elist := build_edgelist(root)
+  depthcalc_helper(root, seen, elist)
+}
+// finds the node at the associated address.
+func addr_to_node(address uintptr, elist []BiEdge) *Node {
+  for _, e := range elist {
+    if e.From.Addr == address { return e.From }
+    if e.To.Addr == address { return e.To }
+  }
+  return nil
+}
+func depthcalc_helper(node *Node, seen map[uintptr]bool, elist []BiEdge) {
+  if seen[node.Addr] { return }
+  seen[node.Addr] = true
+
+  // in any sort of reasonable program, this should never happen. it really
+  // just means our client code is being dumb and computing this twice. not
+  // really an error, but very stupid, so let's not panic but still warn.
+  if node.depth != 0 {
+    fmt.Printf("depth previously calculated?  resetting depth.\n")
+    node.depth = 0
+  }
+  // the depth of a block is the number of loop headers which both dominate and
+  // are reachable from the current node.
+  for d := range node.Dominators.set {
+    n := addr_to_node(d, elist)
+    if n == nil { panic("node not found!") } // dominator is not in graph??
+    // verifying the addresses aren't equal is due to an annoying quirk of
+    // dominator sets: a node always dominates itself, but for us that would
+    // mean loop headers have a depth of 1, which is stupid.
+    if n.LoopHeader() && n.Addr != node.Addr && Reachable(n, node) {
+      node.depth++
+    }
+  }
+  for _, e := range node.Edgelist {
+    depthcalc_helper(e.To, seen, elist)
+  }
 }
 
 // calculates the dominance set for every node in the graph.  modifies the
