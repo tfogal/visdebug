@@ -190,43 +190,53 @@ func (s SymListA) Less(i int, j int) bool {
 }
 func (s SymListA) Swap(i int, j int) { s[i], s[j] = s[j], s[i] }
 
-type ccfg struct {} // build CFG for local function
-func (ccfg) Execute(inferior *ptrace.Tracee) (error) {
-  regs, err := inferior.GetRegs()
-  if err != nil { return err }
-
-  // Ergh.  We have the instruction pointer, but cfg.Local does its filtering
-  // based on the symbol (really, function) name.  So we search through our
-  // symbtable and "convert" our current insn ptr to a function name.
-  if err = verify_symbols_loaded(inferior) ; err != nil { return err }
-
+// find what function the given address is in.
+func find_function(address uintptr) (*bfd.Symbol, error) {
+  if len(symbols) == 0 {
+    return nil, errors.New("symbol list is empty, forgot to load them?")
+  }
   // copy our symlist to a new variable so that we can change the sort order to
   // be addresses instead of names without mucking up our normal table.
   addr_syms := make([]bfd.Symbol, len(symbols))
   copy(addr_syms, symbols)
   sort.Sort(SymListA(addr_syms))
 
-  // We can't use sort.Search here because we can be in the middle of a
+  // We can't use sort.Search here because 'address' can be in the middle of a
   // function, and we don't have an entry for every possible address.  We just
   // want to find the "minimum" address we are in.
   fidx := 0
-  for i, sy := range addr_syms {
-    if sy.Address() <= uintptr(regs.Rip) { fidx = i }
-    if sy.Address() > uintptr(regs.Rip) { break } // will never find anything
+  for i, sy := range addr_syms { // todo we should really do a binary search
+    if sy.Address() <= address { fidx = i }
+    if sy.Address() > address { break } // will never find anything
   }
   if fidx == len(addr_syms) {
-    return fmt.Errorf("addr 0x%0x not found in %d-symbol list", regs.Rip,
-                      len(addr_syms))
+    return nil, fmt.Errorf("addr 0x%0x not found in %d-symbol list", address,
+                           len(addr_syms))
   }
   if addr_syms[fidx].Address() == 0x0 {
-    return errors.New("we are near NULL?  I don't believe it, probably a bug.")
+    return nil,
+           errors.New("we are near NULL?  I don't believe it, probably a bug.")
   }
   if addr_syms[fidx].Name() == "" {
-    return errors.New("insn ptr is in no man's land.")
+    return nil, errors.New("insn ptr is in no man's land.")
   }
+  return &addr_syms[fidx], nil
+}
 
-  graph := cfg.Local(globals.program, addr_syms[fidx].Name())
-  fmt.Printf("digraph %s {\n", addr_syms[fidx].Name())
+type ccfg struct {} // build CFG for local function
+func (ccfg) Execute(inferior *ptrace.Tracee) (error) {
+  if err := verify_symbols_loaded(inferior) ; err != nil { return err }
+  regs, err := inferior.GetRegs()
+  if err != nil { return err }
+
+  // Ergh.  We have the instruction pointer, but cfg.Local does its filtering
+  // based on the symbol (really, function) name.  So we search through our
+  // symbtable and "convert" our current insn ptr to a function name.
+  symb, err := find_function(uintptr(regs.Rip))
+  if err != nil { return err }
+
+  graph := cfg.Local(globals.program, symb.Name())
+  fmt.Printf("digraph %s {\n", symb.Name())
   inorder(graph, dotNode)
   fmt.Printf("}\n")
   return nil
@@ -250,6 +260,22 @@ func (csymlist) Execute(inferior *ptrace.Tracee) (error) {
     n += nbytes
   }
   fmt.Printf("\n")
+  return nil
+}
+
+// maps the current instruction pointer to a function and then tells the user
+// where they are.
+type cwhereami struct{}
+func (cwhereami) Execute(inferior *ptrace.Tracee) (error) {
+  if err := verify_symbols_loaded(inferior) ; err != nil { return err }
+  regs, err := inferior.GetRegs()
+  if err != nil { return err }
+
+  symb, err := find_function(uintptr(regs.Rip))
+  if err != nil { return err }
+
+  diff := uintptr(regs.Rip) - symb.Address()
+  fmt.Printf("0x%012x  %s+%d\n", uintptr(regs.Rip), symb.Name(), diff)
   return nil
 }
 
@@ -282,6 +308,7 @@ func parse_cmdline(line string) (Command) {
     case "cfg": return ccfg{}
     case "symlist": fallthrough
     case "symbols": return csymlist{}
+    case "whereami": return cwhereami{}
     default: return cgeneric{tokens}
   }
 }
