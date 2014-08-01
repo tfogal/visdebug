@@ -103,7 +103,8 @@ func main() {
     assert(root != nil)
     cfg.Dominance(root)
     fmt.Printf("digraph %s {\n", basename(argv[0]))
-    inorder(graph, dotNode)
+    printer := func(node *cfg.Node) { dotNode(node, os.Stdout) }
+    inorder(graph, printer)
     fmt.Println("}");
   }
 

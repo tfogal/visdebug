@@ -223,22 +223,59 @@ func find_function(address uintptr) (*bfd.Symbol, error) {
   return &addr_syms[fidx], nil
 }
 
-type ccfg struct {} // build CFG for local function
-func (ccfg) Execute(inferior *ptrace.Tracee) (error) {
+// identifies the root node (function entry point) of the graph
+func root_node(graph map[uintptr]*cfg.Node, symb *bfd.Symbol) *cfg.Node {
+  for _, v := range graph {
+    if v.Name == symb.Name() || v.Addr == symb.Address() { return v }
+  }
+  return nil
+}
+
+// build CFG for local function
+type ccfg struct {
+  filename string // output to this file, if set.
+}
+func (c ccfg) Execute(inferior *ptrace.Tracee) (error) {
   if err := verify_symbols_loaded(inferior) ; err != nil { return err }
   regs, err := inferior.GetRegs()
   if err != nil { return err }
 
   // Ergh.  We have the instruction pointer, but cfg.Local does its filtering
-  // based on the symbol (really, function) name.  So we search through our
+  // based on the symbol (really, function) *name*.  So we search through our
   // symbtable and "convert" our current insn ptr to a function name.
   symb, err := find_function(uintptr(regs.Rip))
   if err != nil { return err }
 
   graph := cfg.Local(globals.program, symb.Name())
-  fmt.Printf("digraph %s {\n", symb.Name())
-  inorder(graph, dotNode)
-  fmt.Printf("}\n")
+  // sometimes it seems we are unable to find the root node.  this appears to
+  // only happen if the function lives in a stripped shared library.
+  if rn := root_node(graph, symb) ; rn != nil {
+    cfg.Analyze(rn)
+    // default to stdout, but can output to a file.  But 'inorder' needs a
+    // 1-argument function, so construct a closure around the appropriate
+    // writer.
+    writer := os.Stdout
+    if c.filename != "" {
+      writer, err = os.OpenFile(c.filename, os.O_WRONLY|os.O_CREATE|os.O_TRUNC,
+                                0666)
+      if err != nil { return err }
+    }
+    printer := func(node *cfg.Node) { dotNode(node, writer) }
+    fmt.Fprintf(writer, "digraph %s {\n", symb.Name())
+    inorder(graph, printer)
+    fmt.Fprintf(writer, "}\n")
+    if writer != os.Stdout {
+      if err := writer.Close() ; err != nil {
+        return err
+      }
+      fmt.Printf("Output '%s' successfully created.\n", c.filename)
+    }
+  } else {
+    fmt.Printf("Cannot find root node of %d-element graph!\n", len(graph))
+    fmt.Printf("This likely means the function is in a stripped shared ")
+    fmt.Printf("library.  Build the library with debug symbols and do not ")
+    fmt.Printf("strip it if you'd like to be able to generate this CFG.\n")
+  }
   return nil
 }
 
@@ -305,7 +342,10 @@ func parse_cmdline(line string) (Command) {
     case "deref":
       if len(tokens) == 1 { return cparseerror{"not enough arguments"} }
       return cderef{tokens[1]}
-    case "cfg": return ccfg{}
+    case "cfg":
+      if len(tokens) == 1 { return ccfg{} }
+      if len(tokens) == 2 { return ccfg{tokens[1]} } // 1, optional, parameter.
+      return cparseerror{"too many arguments"}
     case "symlist": fallthrough
     case "symbols": return csymlist{}
     case "whereami": return cwhereami{}

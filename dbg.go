@@ -5,6 +5,7 @@ package main
 
 import "bufio"
 import "fmt"
+import "io"
 import "log"
 import "os"
 import "syscall"
@@ -113,23 +114,43 @@ func loop1d(node *cfg.Node) (bool) {
   return false;
 }
 
+func max_depth(root *cfg.Node) uint {
+  seen := make(map[uintptr]bool)
+  return max_depth_helper(root, seen)
+}
+func max_depth_helper(node *cfg.Node, seen map[uintptr]bool) uint {
+  if seen[node.Addr] { return 0 }
+  seen[node.Addr] = true
+
+  dpth := node.Depth()
+  for _, e := range node.Edgelist {
+    d := max_depth_helper(e.To, seen)
+    if d > dpth { dpth = d }
+  }
+  return dpth
+}
 // prints out a node in 'dot' notation.
-func dotNode(node *cfg.Node) {
-  fmt.Printf("\t\t\"0x%08x\" [", node.Addr)
+func dotNode(node *cfg.Node, w io.Writer) {
+  fmt.Fprintf(w, "\t\"0x%08x\" [", node.Addr)
+  fmt.Fprintf(w, "label = \"")
   if(node.Name != "") {
-    fmt.Printf("label = \"%s\", ", node.Name)
-  }
-  col := lerp(node.Dominators.Len(), 0,25, 0,255)
-  assert(col <= 255)
-  if(node.Dominators.Len() == 0) {
-    fmt.Printf("color=\"#ff0000\"");
+    fmt.Fprintf(w, "%s\\n", node.Name)
   } else {
-    fmt.Printf("color=\"#00%x00\"", col)
+    fmt.Fprintf(w, "0x%08x\\n", node.Addr)
   }
-  fmt.Printf("];\n");
+  dpth := node.Depth()
+  dpth_max := max_depth(node)
+
+  fmt.Fprintf(w, "Depth: %d", dpth)
+  if node.LoopHeader() {
+    fmt.Fprintf(w, "\\nLoop header")
+  }
+  depthcolor := uint8(lerp(dpth, 0,dpth_max, 0,255))
+  fmt.Fprintf(w, "\", color=\"#0000%02x\"", depthcolor)
+  fmt.Fprintf(w, "];\n")
 
   for _, edge := range node.Edgelist {
-    fmt.Printf("\t\t\"0x%08x\" -> \"0x%08x\";\n", node.Addr, edge.To.Addr)
+    fmt.Fprintf(w, "\t\"0x%08x\" -> \"0x%08x\";\n", node.Addr, edge.To.Addr)
   }
 }
 
@@ -156,7 +177,7 @@ find_helper(node *cfg.Node, seen map[uintptr]bool, name string) (*cfg.Node) {
 
 // linear interpolate
 func lerp(val uint, imin uint,imax uint, omin uint,omax uint) (uint) {
-  assert(imin < imax)
+  assert(imin <= imax)
   assert(omin < omax)
   return uint(float64(omin) + float64(val-imin) *
                               float64(omax-omin) / float64(imax-imin))
