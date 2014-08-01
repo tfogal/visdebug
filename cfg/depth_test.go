@@ -16,7 +16,7 @@ func TestDepthSimple(t *testing.T) {
 
   Analyze(entry)
   if entry.Depth() != 0 {
-    t.Error("entry depth is nonzero:", entry.Depth())
+    t.Error("entry depth is not 1:", entry.Depth())
   }
   if hdr.Depth() != 0 {
     t.Error("header depth is not 1:", hdr.Depth())
@@ -41,7 +41,7 @@ var depth_test /* hah! */ = []tstdepth{
   {"400b20", 0},
   {"40090a", 1},
   {"400b06", 1},
-  {"400b1b", 2},
+  {"400b1b", 1},
   {"400917", 2},
   {"400b35", 0},
 }
@@ -53,8 +53,8 @@ func TestDepthSmooth2(t *testing.T) {
   for _, tst := range depth_test {
     n := findnode(entry, tst.nodename)
     if n.Depth() != tst.depth {
-      t.Error("node %s (0x%0x) should have depth", tst.depth, "but has:",
-              n.Depth())
+      t.Error("node", n.Name, "(", n.Addr, ") should have depth", tst.depth,
+              "but has:", n.Depth())
     }
   }
 }

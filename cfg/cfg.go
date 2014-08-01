@@ -175,8 +175,9 @@ func loopcalc(from* Node, seen map[uintptr]bool) {
 }
 func (n *Node) InLoop() bool { return (n.flags & LOOP_BODY) > 0 }
 func (n *Node) LoopHeader() bool { return (n.flags & LOOP_HEADER) > 0 }
-// returns the loop depth that the basic block is in.
-func (n *Node) Depth() uint { return n.depth }
+// returns the loop depth that the basic block is in.  our depth calculations
+// start at 1, so we remove one to make loop depth == dimensionality.
+func (n *Node) Depth() uint { return n.depth-1 }
 
 // counts the number of edges to 'target' from 'source'.  The 'source' edge
 // counts, so this is positive---or unreachable, which gives 0.
@@ -386,18 +387,24 @@ func depthcalc_helper(node *Node, seen map[uintptr]bool, elist []BiEdge) {
     fmt.Printf("depth previously calculated?  resetting depth.\n")
     node.depth = 0
   }
-  // the depth of a block is the number of loop headers which both dominate and
-  // are reachable from the current node.
+  // the depth of a block is the depth of the most-enclosing loop header, +1
+  max_depth := uint(0)
   for d := range node.Dominators.set {
     n := addr_to_node(d, elist)
     if n == nil { panic("node not found!") } // dominator is not in graph??
-    // verifying the addresses aren't equal is due to an annoying quirk of
-    // dominator sets: a node always dominates itself, but for us that would
-    // mean loop headers have a depth of 1, which is stupid.
-    if n.LoopHeader() && n.Addr != node.Addr && Reachable(n, node) {
-      node.depth++
+    // nodes dominate themself, but that doesn't tell us anything, here.
+    if n.Addr == node.Addr { continue }
+    // Remove all dominators except the one under consideration
+    // when performing the reachability analysis. this filters out
+    // the 'exit' branches of loop conditionals, so that they are only
+    // considered as part of "higher" loops.
+    other_doms := exclude(node.Dominators, d)
+    delete(other_doms.set, node.Addr)
+    if n.LoopHeader() && reachable(n, node, other_doms.set) {
+      if n.depth > max_depth { max_depth = n.depth }
     }
   }
+  node.depth = max_depth + 1
   for _, e := range node.Edgelist {
     depthcalc_helper(e.To, seen, elist)
   }
