@@ -262,6 +262,7 @@ func (c ccfg) Execute(inferior *ptrace.Tracee) (error) {
     }
     printer := func(node *cfg.Node) { dotNode(node, writer) }
     fmt.Fprintf(writer, "digraph %s {\n", symb.Name())
+    fmt.Fprintf(writer, "\tranksep=\"0.2 equally\";\n\tratio=0.7;\n")
     inorder(graph, printer)
     fmt.Fprintf(writer, "}\n")
     if writer != os.Stdout {
