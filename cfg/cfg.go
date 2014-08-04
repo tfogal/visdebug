@@ -13,10 +13,10 @@ import "reflect"
 import "unsafe"
 
 const(
-  LOOP_HEADER = (1 << 0)
-  LOOP_BODY   = (1 << 1) // body and header are not exclusive (nested loops)
-  ENTRY =       (1 << 2) // entry point of a function
-  EXIT =        (1 << 3)
+  LOOP_HEADER = 1 << iota
+  LOOP_BODY   = 1 << iota // body and header are not exclusive (nested loops)
+  ENTRY       = 1 << iota // entry point of a function
+  EXIT        = 1 << iota
 )
 
 // set for keeping track of per-node dominance.  all corresponding functions
