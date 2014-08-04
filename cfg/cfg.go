@@ -13,10 +13,10 @@ import "reflect"
 import "unsafe"
 
 const(
-  LOOP_HEADER = 1 << iota
-  LOOP_BODY   = 1 << iota // body and header are not exclusive (nested loops)
-  ENTRY       = 1 << iota // entry point of a function
-  EXIT        = 1 << iota
+  loopHeader = 1 << iota
+  loopBody   = 1 << iota // body and header are not exclusive (nested loops)
+  entry      = 1 << iota // entry point of a function
+  exit       = 1 << iota
 )
 
 // set for keeping track of per-node dominance.  all corresponding functions
@@ -168,13 +168,13 @@ func loopcalc(from* Node, seen map[uintptr]bool) {
   seen[from.Addr] = true
   for _, edge := range from.Edgelist {
     if Reachable(from, edge.To) {
-      from.flags |= LOOP_BODY
+      from.flags |= loopBody
     }
     loopcalc(edge.To, seen)
   }
 }
-func (n *Node) InLoop() bool { return (n.flags & LOOP_BODY) > 0 }
-func (n *Node) LoopHeader() bool { return (n.flags & LOOP_HEADER) > 0 }
+func (n *Node) InLoop() bool { return (n.flags & loopBody) > 0 }
+func (n *Node) LoopHeader() bool { return (n.flags & loopHeader) > 0 }
 // returns the loop depth that the basic block is in.  our depth calculations
 // start at 1, so we remove one to make loop depth == dimensionality.
 func (n *Node) Depth() uint { return n.depth-1 }
@@ -331,7 +331,7 @@ func headers_helper(node *Node, seen map[uintptr]bool, elist []BiEdge) {
   if in == 2 && out == 2 {
     if Reachable(node, node.Edgelist[0].To) ||
        Reachable(node, node.Edgelist[1].To) {
-      node.flags |= LOOP_HEADER
+      node.flags |= loopHeader
     }
   }
   for _, e := range node.Edgelist { // recurse.
