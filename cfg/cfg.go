@@ -117,13 +117,13 @@ func go_graph(ccfg *C.struct_node, nnodes uint) (map[uintptr]*Node) {
 }
 
 // Computes the control flow graph for the given program and returns it.  Does
-// some basic filtering to get rid 'internal' symbols.
+// some basic filtering to get rid of 'internal' symbols.
 // Note that this memleaks a bit (C++ lib is broken)!  Do not call in a loop.
 func Build(program string) (map[uintptr]*Node) {
   var c_nnodes C.size_t
   progname := C.CString(program);
   ccfg := C.cfg(progname, &c_nnodes);
-  C.free(unsafe.Pointer(progname))
+  defer C.free(unsafe.Pointer(progname))
   nnodes := uint(c_nnodes)
   return go_graph(ccfg, nnodes)
 }
@@ -136,8 +136,8 @@ func Local(program string, function string) (map[uintptr]*Node) {
   progname := C.CString(program);
   funcname := C.CString(function)
   ccfg := C.cfgLocal(progname, funcname, &c_nnodes)
-  C.free(unsafe.Pointer(progname))
-  C.free(unsafe.Pointer(funcname))
+  defer C.free(unsafe.Pointer(progname))
+  defer C.free(unsafe.Pointer(funcname))
   nnodes := uint(c_nnodes)
   return go_graph(ccfg, nnodes)
 }
