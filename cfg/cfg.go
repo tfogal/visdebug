@@ -96,7 +96,7 @@ func go_graph(ccfg *C.struct_node, nnodes uint) (map[uintptr]*Node) {
       // At another iteration through our outer loop, we'll see the address
       // again and fill in the other parts.
       if cfg[dest] == nil {
-        cfg[dest] = &Node{Name: "", Addr: dest, Edgelist: nil}
+        cfg[dest] = makeNode("", dest)
       }
       cfg[addr].Edgelist[e] = &Edge{
         To: cfg[dest],
