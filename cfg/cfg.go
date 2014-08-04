@@ -40,7 +40,7 @@ type Node struct {
   dominators domset
   depth uint
 }
-func makeNode(name string, addr uintptr) (*Node) {
+func makeNode(name string, addr uintptr) *Node {
   return &Node{name, addr, nil, 0, nullset(), 0}
 }
 
@@ -60,7 +60,7 @@ func assert(conditional bool) {
 
 // converts the C graph structure into a Go graph structure.  Takes ownership
 // of 'ccfg' and deallocates it.
-func go_graph(ccfg *C.struct_node, nnodes uint) (map[uintptr]*Node) {
+func go_graph(ccfg *C.struct_node, nnodes uint) map[uintptr]*Node {
   var gocfg []C.struct_node
   header := (*reflect.SliceHeader)(unsafe.Pointer(&gocfg))
   header.Cap = int(nnodes)
@@ -119,7 +119,7 @@ func go_graph(ccfg *C.struct_node, nnodes uint) (map[uintptr]*Node) {
 // Computes the control flow graph for the given program and returns it.  Does
 // some basic filtering to get rid of 'internal' symbols.
 // Note that this memleaks a bit (C++ lib is broken)!  Do not call in a loop.
-func Build(program string) (map[uintptr]*Node) {
+func Build(program string) map[uintptr]*Node {
   var c_nnodes C.size_t
   progname := C.CString(program);
   ccfg := C.cfg(progname, &c_nnodes);
@@ -131,7 +131,7 @@ func Build(program string) (map[uintptr]*Node) {
 // Computes the LOCAL (to a function) control flow graph.
 // todo: return a single node? a single function should only have one entry.
 // Note that this memleaks a bit (C++ lib is broken)!  Do not call in a loop.
-func Local(program string, function string) (map[uintptr]*Node) {
+func Local(program string, function string) map[uintptr]*Node {
   var c_nnodes C.size_t
   progname := C.CString(program);
   funcname := C.CString(function)
@@ -143,13 +143,13 @@ func Local(program string, function string) (map[uintptr]*Node) {
 }
 
 // returns true if the node 'target' is reachable from 'from'.
-func Reachable(target *Node, from *Node) (bool) {
+func Reachable(target *Node, from *Node) bool {
   seen := make(map[uintptr]bool)
   return reachable(target, from, seen)
 }
 
 // internal helper function for 'Reachable'.
-func reachable(target *Node, from *Node, seen map[uintptr]bool) (bool) {
+func reachable(target *Node, from *Node, seen map[uintptr]bool) bool {
   if seen[from.Addr] { return false }
   seen[from.Addr] = true
   for _, edge := range from.Edgelist {
@@ -182,12 +182,12 @@ func (n *Node) Depth() uint { return n.depth-1 }
 
 // counts the number of edges to 'target' from 'source'.  The 'source' edge
 // counts, so this is positive---or unreachable, which gives 0.
-func loop_distance(target *Node, source *Edge) (uint) {
+func loop_distance(target *Node, source *Edge) uint {
   seen := make(map[uintptr]bool)
   return loop_dist(target, source, seen)
 }
 
-func minu(a uint, b uint) (uint) {
+func minu(a uint, b uint) uint {
   if a < b {
     return a
   }
@@ -198,7 +198,7 @@ type vvaluep func(value uint) (bool)
 
 /* minimum for a vector of uint values, but accepts a predicate to determine
  * whether a value is 'valid' or not. */
-func minuvp(values []uint, predicate vvaluep) (uint) {
+func minuvp(values []uint, predicate vvaluep) uint {
   ret := uint(math.MaxUint64)
   for _, v := range values {
     if predicate(v) {
@@ -208,7 +208,7 @@ func minuvp(values []uint, predicate vvaluep) (uint) {
   return ret
 }
 
-func loop_dist(target *Node, edge *Edge, seen map[uintptr]bool) (uint) {
+func loop_dist(target *Node, edge *Edge, seen map[uintptr]bool) uint {
   if seen[edge.To.Addr] { return 0 }
   seen[edge.To.Addr] = true
 
@@ -234,13 +234,13 @@ func loop_dist(target *Node, edge *Edge, seen map[uintptr]bool) (uint) {
   return 1 + minuvp(distances, nonzero)
 }
 
-func nullset() (domset) {
+func nullset() domset {
   var dom domset
   dom.set = make(map[uintptr]bool)
   return dom
 }
 // unions the two sets together.
-func union(a domset, b domset) (domset) {
+func union(a domset, b domset) domset {
   var dom domset
   dom.set = make(map[uintptr]bool, len(a.set) + len(b.set))
   for ptr, _ := range a.set {
@@ -251,7 +251,7 @@ func union(a domset, b domset) (domset) {
   }
   return dom
 }
-func intersection(a domset, b domset) (domset) {
+func intersection(a domset, b domset) domset {
   var result domset
   result.set = make(map[uintptr]bool)
   for ptrA, _ := range a.set {
@@ -262,19 +262,19 @@ func intersection(a domset, b domset) (domset) {
   }
   return result
 }
-func exclude(a domset, elem uintptr) (domset) {
+func exclude(a domset, elem uintptr) domset {
   null := nullset()
   dom := union(a, null) // basically 'copy a'
   delete(dom.set, elem)
   return dom
 }
 // construct a singleton set out of the given pointer.
-func set(address uintptr) (domset) {
+func set(address uintptr) domset {
   dom := nullset()
   dom.set[address] = true
   return dom
 }
-func sameset(a domset, b domset) (bool) {
+func sameset(a domset, b domset) bool {
   return len(intersection(a,b).set) == len(a.set)
 }
 
@@ -453,14 +453,14 @@ func dominance_helper(chld *Node, parent *Node) {
 
 
 // reachable in a single step
-func reachable1(target *Node, from *Node) (bool) {
+func reachable1(target *Node, from *Node) bool {
   for _, edge := range from.Edgelist {
     if edge.To == target { return true }
   }
   return false
 }
 
-func reachable2(target *Node, from *Node) (bool) {
+func reachable2(target *Node, from *Node) bool {
   for _, edge1 := range from.Edgelist {
     node1 := edge1.To
     for _, edge2 := range node1.Edgelist {
@@ -470,7 +470,7 @@ func reachable2(target *Node, from *Node) (bool) {
   return false
 }
 
-func reachable3(target *Node, from *Node) (bool) {
+func reachable3(target *Node, from *Node) bool {
   for _, edge1 := range from.Edgelist {
     node1 := edge1.To
     for _, edge2 := range node1.Edgelist {
