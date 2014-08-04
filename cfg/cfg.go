@@ -8,7 +8,6 @@ package cfg;
 import "C"
 import "bytes"
 import "fmt"
-import "math"
 import "reflect"
 import "unsafe"
 
@@ -166,61 +165,6 @@ func (n *Node) Depth() uint {
   // our depth calculations start at 1, so we remove one to make loop
   // depth == dimensionality.
   return n.depth-1
-}
-
-// counts the number of edges to 'target' from 'source'.  The 'source' edge
-// counts, so this is positive---or unreachable, which gives 0.
-func loop_distance(target *Node, source *Edge) uint {
-  seen := make(map[uintptr]bool)
-  return loop_dist(target, source, seen)
-}
-
-func minu(a uint, b uint) uint {
-  if a < b {
-    return a
-  }
-  return b
-}
-/* valid value predicate */
-type vvaluep func(value uint) (bool)
-
-/* minimum for a vector of uint values, but accepts a predicate to determine
- * whether a value is 'valid' or not. */
-func minuvp(values []uint, predicate vvaluep) uint {
-  ret := uint(math.MaxUint64)
-  for _, v := range values {
-    if predicate(v) {
-      ret = minu(ret, v)
-    }
-  }
-  return ret
-}
-
-func loop_dist(target *Node, edge *Edge, seen map[uintptr]bool) uint {
-  if seen[edge.To.Addr] { return 0 }
-  seen[edge.To.Addr] = true
-
-  if edge.To.Addr == target.Addr {
-    return 1
-  }
-
-  // Is edge.To a leaf node?  Then 'ya can't get thar from here', as the
-  // Maineacs say.
-  if len(edge.To.Edgelist) == 0 { return 0 }
-
-  // the distance is 1+the distance from the node 'edge' points to.
-  // but 'edge.To' can have any number of outward edges, so there could be
-  // multiple paths to 'target'.  Compute the distance along each edge, and
-  // return the minimum non-zero distance.
-  distances := make([]uint, len(edge.To.Edgelist))
-  for i, subedge := range edge.To.Edgelist {
-    // we can't do 1+ here because we filter out the 0's later.
-    distances[i] = loop_dist(target, subedge, seen)
-  }
-  nonzero := func(value uint) (bool) { return value > 0 }
-  /* the /shortest/ path is the one we want to report.
-   * also, don't forget the "1+" part! */
-  return 1 + minuvp(distances, nonzero)
 }
 
 func nullset() domset {
