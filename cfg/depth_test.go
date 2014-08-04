@@ -2,10 +2,10 @@ package cfg
 import "testing"
 
 func TestDepthSimple(t *testing.T) {
-  entry := mkNode("entry", 0x400b0a)
-  hdr := mkNode("hdr", 0x400c0a)
-  out := mkNode("out", 0x400d0a)
-  body := mkNode("body", 0x400ead)
+  entry := makeNode("entry", 0x400b0a)
+  hdr := makeNode("hdr", 0x400c0a)
+  out := makeNode("out", 0x400d0a)
+  body := makeNode("body", 0x400ead)
   entry.Edgelist = make([]*Edge, 1)
   entry.Edgelist[0] = &Edge{hdr, 0}
   hdr.Edgelist = make([]*Edge, 2)

@@ -40,7 +40,7 @@ type Node struct {
   dominators domset
   depth uint
 }
-func mkNode(name string, addr uintptr) (*Node) {
+func makeNode(name string, addr uintptr) (*Node) {
   return &Node{name, addr, nil, 0, nullset(), 0}
 }
 
@@ -76,7 +76,7 @@ func go_graph(ccfg *C.struct_node, nnodes uint) (map[uintptr]*Node) {
     // the node could have been created as a target of a previous edge, but if
     // so then we didn't know anything about it...
     if cfg[addr] == nil {
-      cfg[addr] = mkNode("", uintptr(0))
+      cfg[addr] = makeNode("", uintptr(0))
     }
     // ... so we need to fill that stuff in anyway.
     cfg[addr].Name = C.GoString(gocfg[i].name)

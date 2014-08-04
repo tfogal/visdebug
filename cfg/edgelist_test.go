@@ -26,8 +26,8 @@ var eltests = []test_el {
 }
 
 func TestEdgeListSimple(t *testing.T) {
-  a := mkNode("a", 0x400b0a)
-  b := mkNode("b", 0x400c0a)
+  a := makeNode("a", 0x400b0a)
+  b := makeNode("b", 0x400c0a)
   a.Edgelist = make([]*Edge, 1)
   a.Edgelist[0] = &Edge{b, 0}
 

@@ -9,14 +9,14 @@ func lassert(t *testing.T, conditional bool, msg string) {
 }
 
 func TestSingleNodeLoop(t *testing.T) {
-  n := mkNode("root", 0x00000042)
+  n := makeNode("root", 0x00000042)
   identify_loops(n)
   lassert(t, !n.InLoop(), "single node is not a loop.")
 }
 
 func TestSimpleLoopIsInLoop(t *testing.T) {
-  hd := mkNode("root", 0x00000042)
-  tail := mkNode("sub", 0x00000084)
+  hd := makeNode("root", 0x00000042)
+  tail := makeNode("sub", 0x00000084)
   hd.Edgelist = make([]*Edge, 1)
   tail.Edgelist = make([]*Edge, 1)
   hd.Edgelist[0] = &Edge{tail, 0}
@@ -28,9 +28,9 @@ func TestSimpleLoopIsInLoop(t *testing.T) {
 }
 
 func TestLoopWithExit(t *testing.T) {
-  ltest := mkNode("test", 0x00000042)
-  body := mkNode("body", 0x00000084)
-  done := mkNode("done", 0x00000096)
+  ltest := makeNode("test", 0x00000042)
+  body := makeNode("body", 0x00000084)
+  done := makeNode("done", 0x00000096)
   ltest.Edgelist = make([]*Edge, 1)
   body.Edgelist = make([]*Edge, 1)
   // no exit from 'done'.
@@ -44,8 +44,8 @@ func TestLoopWithExit(t *testing.T) {
 }
 
 func TestDistance2Node(t *testing.T) {
-  hd := mkNode("root", 0x00000042)
-  tail := mkNode("sub", 0x00000084)
+  hd := makeNode("root", 0x00000042)
+  tail := makeNode("sub", 0x00000084)
   hd.Edgelist = make([]*Edge, 1)
   tail.Edgelist = make([]*Edge, 1)
   hd.Edgelist[0] = &Edge{tail, 0}
@@ -57,10 +57,10 @@ func TestDistance2Node(t *testing.T) {
 
 func TestDistanceUnreachable(t *testing.T) {
   /* two isolated loops; should be mostly unreachable. */
-  node1 := mkNode("node1", 0x00000042)
-  n1sub := mkNode("n1chld", 0x00000084)
-  node2 := mkNode("node2", 0x00000019)
-  n2sub := mkNode("n2chld", 0x00000038)
+  node1 := makeNode("node1", 0x00000042)
+  n1sub := makeNode("n1chld", 0x00000084)
+  node2 := makeNode("node2", 0x00000019)
+  n2sub := makeNode("n2chld", 0x00000038)
   node1.Edgelist = make([]*Edge, 1)
   n1sub.Edgelist = make([]*Edge, 1)
   node1.Edgelist[0] = &Edge{n1sub, 0}

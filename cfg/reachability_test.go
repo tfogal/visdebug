@@ -2,15 +2,15 @@ package cfg
 import "testing"
 
 func TestSingleNode(t *testing.T) {
-  n := mkNode("root", 0x00000042)
+  n := makeNode("root", 0x00000042)
   if Reachable(n, n) {
     t.Fatalf("node should not be reachable from itself.")
   }
 }
 
 func TestSimpleLoop(t *testing.T) {
-  hd := mkNode("root", 0x00000042)
-  tail := mkNode("sub", 0x00000084)
+  hd := makeNode("root", 0x00000042)
+  tail := makeNode("sub", 0x00000084)
   hd.Edgelist = make([]*Edge, 1)
   tail.Edgelist = make([]*Edge, 1)
   hd.Edgelist[0] = &Edge{tail, 0}
@@ -31,10 +31,10 @@ func tassert(t *testing.T, conditional bool, msg string) {
 }
 
 func TestNormalLoop(t *testing.T) {
-  header := mkNode("funcentry", 0x00000001)
-  looptest := mkNode("test", 0x00000002)
-  body := mkNode("body", 0x00000004)
-  post := mkNode("post", 0x00000008)
+  header := makeNode("funcentry", 0x00000001)
+  looptest := makeNode("test", 0x00000002)
+  body := makeNode("body", 0x00000004)
+  post := makeNode("post", 0x00000008)
   header.Edgelist = make([]*Edge, 1)
   looptest.Edgelist = make([]*Edge, 2)
   body.Edgelist = make([]*Edge, 1)
