@@ -58,7 +58,8 @@ func assert(conditional bool) {
   if false == conditional { panic("assertion failure") }
 }
 
-// converts the C graph structure into a Go graph structure
+// converts the C graph structure into a Go graph structure.  Takes ownership
+// of 'ccfg' and deallocates it.
 func go_graph(ccfg *C.struct_node, nnodes uint) (map[uintptr]*Node) {
   var gocfg []C.struct_node
   header := (*reflect.SliceHeader)(unsafe.Pointer(&gocfg))
