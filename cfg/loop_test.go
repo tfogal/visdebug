@@ -10,7 +10,7 @@ func lassert(t *testing.T, conditional bool, msg string) {
 
 func TestSingleNodeLoop(t *testing.T) {
   n := mkNode("root", 0x00000042)
-  LoopCalc(n)
+  identify_loops(n)
   lassert(t, !n.InLoop(), "single node is not a loop.")
 }
 
@@ -22,7 +22,7 @@ func TestSimpleLoopIsInLoop(t *testing.T) {
   hd.Edgelist[0] = &Edge{tail, 0}
   tail.Edgelist[0] = &Edge{hd, 0}
 
-  LoopCalc(hd)
+  identify_loops(hd)
   lassert(t, hd.InLoop(), "2 node loop; both nodes in loop")
   lassert(t, tail.InLoop(), "2 node loop; both nodes in loop")
 }
@@ -37,7 +37,7 @@ func TestLoopWithExit(t *testing.T) {
   ltest.Edgelist[0] = &Edge{body, 0}
   body.Edgelist[0] = &Edge{ltest, 0}
 
-  LoopCalc(ltest)
+  identify_loops(ltest)
   lassert(t, ltest.InLoop(), "loop test is part of loop")
   lassert(t, body.InLoop(), "body of course is part of loop")
   lassert(t, !done.InLoop(), "exit block is not part of loop!")
@@ -51,7 +51,7 @@ func TestDistance2Node(t *testing.T) {
   hd.Edgelist[0] = &Edge{tail, 0}
   tail.Edgelist[0] = &Edge{hd, 0}
 
-  dist := LoopDist(hd, hd.Edgelist[0])
+  dist := loop_distance(hd, hd.Edgelist[0])
   lassert(t, dist == uint(2), "distance should be 2")
 }
 
@@ -71,8 +71,8 @@ func TestDistanceUnreachable(t *testing.T) {
   node2.Edgelist[0] = &Edge{n2sub, 0}
   n2sub.Edgelist[0] = &Edge{node2, 0}
 
-  lassert(t, 0 == LoopDist(node1, node2.Edgelist[0]), "n1 !reachable from n2")
-  lassert(t, 0 == LoopDist(node2, node1.Edgelist[0]), "n2 !reachable from n1")
+  lassert(t, 0 == loop_distance(node1, node2.Edgelist[0]), "n1 !reachable from n2")
+  lassert(t, 0 == loop_distance(node2, node1.Edgelist[0]), "n2 !reachable from n1")
 }
 
 type testinfo struct {
@@ -98,7 +98,7 @@ func TestDistanceSmooth2(t *testing.T) {
   for _, tst := range distsmooth2tests {
     nsrc := findnode(smth2, tst.source)
     ntgt := findnode(smth2, tst.dest)
-    distance := LoopDist(ntgt, nsrc.Edgelist[tst.edgeidx])
+    distance := loop_distance(ntgt, nsrc.Edgelist[tst.edgeidx])
     if distance != tst.result {
       t.Error("For", tst, "expected", tst.result, "got", distance)
     }

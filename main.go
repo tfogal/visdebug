@@ -101,7 +101,7 @@ func main() {
     graph := cfg.Build(argv[0])
     root := findNodeByName(graph, "main")
     assert(root != nil)
-    cfg.Dominance(root)
+    cfg.Analyze(root)
     fmt.Printf("digraph %s {\n", basename(argv[0]))
     printer := func(node *cfg.Node) { dotNode(node, os.Stdout) }
     inorder(graph, printer)

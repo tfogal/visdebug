@@ -37,7 +37,7 @@ type Node struct {
   Addr uintptr
   Edgelist []*Edge
   flags uint
-  Dominators domset
+  dominators domset
   depth uint
 }
 func mkNode(name string, addr uintptr) (*Node) {
@@ -159,18 +159,18 @@ func reachable(target *Node, from *Node, seen map[uintptr]bool) (bool) {
   return false
 }
 
-func LoopCalc(root *Node) {
+func identify_loops(root *Node) {
   seen := make(map[uintptr]bool)
-  loopcalc(root, seen)
+  id_loops_helper(root, seen)
 }
-func loopcalc(from* Node, seen map[uintptr]bool) {
+func id_loops_helper(from* Node, seen map[uintptr]bool) {
   if seen[from.Addr] { return }
   seen[from.Addr] = true
   for _, edge := range from.Edgelist {
     if Reachable(from, edge.To) {
       from.flags |= loopBody
     }
-    loopcalc(edge.To, seen)
+    id_loops_helper(edge.To, seen)
   }
 }
 func (n *Node) InLoop() bool { return (n.flags & loopBody) > 0 }
@@ -181,9 +181,9 @@ func (n *Node) Depth() uint { return n.depth-1 }
 
 // counts the number of edges to 'target' from 'source'.  The 'source' edge
 // counts, so this is positive---or unreachable, which gives 0.
-func LoopDist(target *Node, source *Edge) (uint) {
+func loop_distance(target *Node, source *Edge) (uint) {
   seen := make(map[uintptr]bool)
-  return loopdist(target, source, seen)
+  return loop_dist(target, source, seen)
 }
 
 func minu(a uint, b uint) (uint) {
@@ -207,7 +207,7 @@ func minuvp(values []uint, predicate vvaluep) (uint) {
   return ret
 }
 
-func loopdist(target *Node, edge *Edge, seen map[uintptr]bool) (uint) {
+func loop_dist(target *Node, edge *Edge, seen map[uintptr]bool) (uint) {
   if seen[edge.To.Addr] { return 0 }
   seen[edge.To.Addr] = true
 
@@ -225,7 +225,7 @@ func loopdist(target *Node, edge *Edge, seen map[uintptr]bool) (uint) {
   distances := make([]uint, len(edge.To.Edgelist))
   for i, subedge := range edge.To.Edgelist {
     // we can't do 1+ here because we filter out the 0's later.
-    distances[i] = loopdist(target, subedge, seen)
+    distances[i] = loop_dist(target, subedge, seen)
   }
   nonzero := func(value uint) (bool) { return value > 0 }
   /* the /shortest/ path is the one we want to report.
@@ -279,30 +279,30 @@ func sameset(a domset, b domset) (bool) {
 
 // Analyzes a graph, computing all the properties we can.
 func Analyze(root *Node) {
-  Dominance(root)
+  dominance(root)
   headers(root)
   depth(root)
 }
 
 // an edge with both from and to nodes.  sometimes we need to get in-edges,
 // which is a huge PITA with our current graph structure.
-type BiEdge struct {
+type biEdge struct {
   From, To *Node
   flags uint
 }
 // creates an alternate representation of the graph rooted at 'root', based
 // solely on the edges.
-func build_edgelist(root *Node) []BiEdge {
+func build_edgelist(root *Node) []biEdge {
   seen := make(map[uintptr]bool)
   return build_edgelist_helper(root, seen)
 }
-func build_edgelist_helper(node *Node, seen map[uintptr]bool) []BiEdge {
+func build_edgelist_helper(node *Node, seen map[uintptr]bool) []biEdge {
   if seen[node.Addr] { return nil }
   seen[node.Addr] = true
 
-  elist := make([]BiEdge, 0)
+  elist := make([]biEdge, 0)
   for _, e := range node.Edgelist {
-    be := BiEdge{From: node, To: e.To, flags: e.flags}
+    be := biEdge{From: node, To: e.To, flags: e.flags}
     elist = append(elist, be)
 
     el := build_edgelist_helper(e.To, seen)
@@ -318,7 +318,7 @@ func headers(root *Node) {
   seen := make(map[uintptr]bool)
   headers_helper(root, seen, elist)
 }
-func headers_helper(node *Node, seen map[uintptr]bool, elist []BiEdge) {
+func headers_helper(node *Node, seen map[uintptr]bool, elist []biEdge) {
   if seen[node.Addr] { return }
   seen[node.Addr] = true
 
@@ -340,7 +340,7 @@ func headers_helper(node *Node, seen map[uintptr]bool, elist []BiEdge) {
 }
 
 // counts the number of edges which lead in to 'node'.
-func in_edges(node *Node, elist []BiEdge) uint {
+func in_edges(node *Node, elist []biEdge) uint {
   n := uint(0)
   for _, e := range elist {
     if e.To == node { n++ }
@@ -348,7 +348,7 @@ func in_edges(node *Node, elist []BiEdge) uint {
   return n
 }
 // counts the number of edges which lead out of 'node'.
-func out_edges(node *Node, elist []BiEdge) uint {
+func out_edges(node *Node, elist []biEdge) uint {
   n := uint(0)
   for _, e := range elist {
     if e.From == node { n++ }
@@ -369,14 +369,14 @@ func depth(root *Node) {
   depthcalc_helper(root, seen, elist)
 }
 // finds the node at the associated address.
-func addr_to_node(address uintptr, elist []BiEdge) *Node {
+func addr_to_node(address uintptr, elist []biEdge) *Node {
   for _, e := range elist {
     if e.From.Addr == address { return e.From }
     if e.To.Addr == address { return e.To }
   }
   return nil
 }
-func depthcalc_helper(node *Node, seen map[uintptr]bool, elist []BiEdge) {
+func depthcalc_helper(node *Node, seen map[uintptr]bool, elist []biEdge) {
   if seen[node.Addr] { return }
   seen[node.Addr] = true
 
@@ -389,7 +389,7 @@ func depthcalc_helper(node *Node, seen map[uintptr]bool, elist []BiEdge) {
   }
   // the depth of a block is the depth of the most-enclosing loop header, +1
   max_depth := uint(0)
-  for d := range node.Dominators.set {
+  for d := range node.dominators.set {
     n := addr_to_node(d, elist)
     if n == nil { panic("node not found!") } // dominator is not in graph??
     // nodes dominate themself, but that doesn't tell us anything, here.
@@ -398,7 +398,7 @@ func depthcalc_helper(node *Node, seen map[uintptr]bool, elist []BiEdge) {
     // when performing the reachability analysis. this filters out
     // the 'exit' branches of loop conditionals, so that they are only
     // considered as part of "higher" loops.
-    other_doms := exclude(node.Dominators, d)
+    other_doms := exclude(node.dominators, d)
     delete(other_doms.set, node.Addr)
     if n.LoopHeader() && reachable(n, node, other_doms.set) {
       if n.depth > max_depth { max_depth = n.depth }
@@ -412,12 +412,12 @@ func depthcalc_helper(node *Node, seen map[uintptr]bool, elist []BiEdge) {
 
 // calculates the dominance set for every node in the graph.  modifies the
 // graph itself.
-func Dominance(root* Node) {
+func dominance(root* Node) {
   // initialize root node's dominance set to just be itself.
-  root.Dominators = set(root.Addr)
+  root.dominators = set(root.Addr)
   // now recurse on root's children.
   for _, edge := range root.Edgelist {
-    dominance(edge.To, root)
+    dominance_helper(edge.To, root)
   }
 }
 /* recursive dominance calculation.  this computation is a bit different than
@@ -433,20 +433,20 @@ func Dominance(root* Node) {
  * The gist of it is that we only recurse when something changes.  The first
  * time through the graph is, however, a special case in which something always
  * changes. */
-func dominance(chld *Node, parent *Node) {
-  incoming := union(parent.Dominators, set(chld.Addr))
-  if sameset(chld.Dominators, nullset()) { // first time we're here, init.
-    chld.Dominators = incoming
+func dominance_helper(chld *Node, parent *Node) {
+  incoming := union(parent.dominators, set(chld.Addr))
+  if sameset(chld.dominators, nullset()) { // first time we're here, init.
+    chld.dominators = incoming
   } else {
     // we've been here before.  will our update change anything?
-    if sameset(chld.Dominators, intersection(chld.Dominators, incoming)) {
+    if sameset(chld.dominators, intersection(chld.dominators, incoming)) {
       // if it won't change anything, then bail.
       return
     }
-    chld.Dominators = intersection(chld.Dominators, incoming)
+    chld.dominators = intersection(chld.dominators, incoming)
   }
   for _, edge := range chld.Edgelist { // calc dominance of children
-    dominance(edge.To, chld)
+    dominance_helper(edge.To, chld)
   }
 }
 

@@ -29,13 +29,13 @@ var domtests = []testdominfo {
 
 func TestDominance(t *testing.T) {
   entry := smooth2()
-  Dominance(entry)
+  dominance(entry)
 
   for _, tst := range domtests {
     node := findnode(entry, tst.nodename)
     dset  := domset{tst.dominance}
-    if !sameset(node.Dominators, dset) {
-      t.Error("For", tst, "expected:", tst.dominance, "got", node.Dominators)
+    if !sameset(node.dominators, dset) {
+      t.Error("For", tst, "expected:", tst.dominance, "got", node.dominators)
     }
   }
 }
