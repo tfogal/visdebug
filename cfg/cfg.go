@@ -13,8 +13,7 @@ import "reflect"
 import "unsafe"
 
 const(
-  loopHeader = 1 << iota
-  loopBody   = 1 << iota // body and header are not exclusive (nested loops)
+  loopHeader = 1 << iota // comparison point of a loop
   entry      = 1 << iota // entry point of a function
   exit       = 1 << iota
 )
@@ -160,25 +159,14 @@ func reachable(target *Node, from *Node, seen map[uintptr]bool) bool {
   return false
 }
 
-func identify_loops(root *Node) {
-  seen := make(map[uintptr]bool)
-  id_loops_helper(root, seen)
-}
-func id_loops_helper(from* Node, seen map[uintptr]bool) {
-  if seen[from.Addr] { return }
-  seen[from.Addr] = true
-  for _, edge := range from.Edgelist {
-    if Reachable(from, edge.To) {
-      from.flags |= loopBody
-    }
-    id_loops_helper(edge.To, seen)
-  }
-}
-func (n *Node) InLoop() bool { return (n.flags & loopBody) > 0 }
 func (n *Node) LoopHeader() bool { return (n.flags & loopHeader) > 0 }
-// returns the loop depth that the basic block is in.  our depth calculations
-// start at 1, so we remove one to make loop depth == dimensionality.
-func (n *Node) Depth() uint { return n.depth-1 }
+// returns the loop depth that the basic block is in.  The graph must be
+// 'Analyze'd before this returns correct values.
+func (n *Node) Depth() uint {
+  // our depth calculations start at 1, so we remove one to make loop
+  // depth == dimensionality.
+  return n.depth-1
+}
 
 // counts the number of edges to 'target' from 'source'.  The 'source' edge
 // counts, so this is positive---or unreachable, which gives 0.
@@ -222,7 +210,8 @@ func loop_dist(target *Node, edge *Edge, seen map[uintptr]bool) uint {
 
   // the distance is 1+the distance from the node 'edge' points to.
   // but 'edge.To' can have any number of outward edges, so there could be
-  // multiple paths to 'target'.  Compute the target along each edge.
+  // multiple paths to 'target'.  Compute the distance along each edge, and
+  // return the minimum non-zero distance.
   distances := make([]uint, len(edge.To.Edgelist))
   for i, subedge := range edge.To.Edgelist {
     // we can't do 1+ here because we filter out the 0's later.
@@ -392,7 +381,9 @@ func depthcalc_helper(node *Node, seen map[uintptr]bool, elist []biEdge) {
   max_depth := uint(0)
   for d := range node.dominators.set {
     n := addr_to_node(d, elist)
-    if n == nil { panic("node not found!") } // dominator is not in graph??
+    // elist has no record of the node if there are no edges... but if the node
+    // has no out-edges, it is by definition not in any loop.
+    if n == nil { continue }
     // nodes dominate themself, but that doesn't tell us anything, here.
     if n.Addr == node.Addr { continue }
     // Remove all dominators except the one under consideration

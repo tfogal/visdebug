@@ -10,37 +10,29 @@ func lassert(t *testing.T, conditional bool, msg string) {
 
 func TestSingleNodeLoop(t *testing.T) {
   n := makeNode("root", 0x00000042)
-  identify_loops(n)
-  lassert(t, !n.InLoop(), "single node is not a loop.")
-}
-
-func TestSimpleLoopIsInLoop(t *testing.T) {
-  hd := makeNode("root", 0x00000042)
-  tail := makeNode("sub", 0x00000084)
-  hd.Edgelist = make([]*Edge, 1)
-  tail.Edgelist = make([]*Edge, 1)
-  hd.Edgelist[0] = &Edge{tail, 0}
-  tail.Edgelist[0] = &Edge{hd, 0}
-
-  identify_loops(hd)
-  lassert(t, hd.InLoop(), "2 node loop; both nodes in loop")
-  lassert(t, tail.InLoop(), "2 node loop; both nodes in loop")
+  Analyze(n)
+  lassert(t, n.Depth() == 0, "single node is not a loop!")
 }
 
 func TestLoopWithExit(t *testing.T) {
+  entry := makeNode("entry", 0x00000024)
   ltest := makeNode("test", 0x00000042)
   body := makeNode("body", 0x00000084)
   done := makeNode("done", 0x00000096)
-  ltest.Edgelist = make([]*Edge, 1)
+  entry.Edgelist = make([]*Edge, 1)
+  ltest.Edgelist = make([]*Edge, 2)
   body.Edgelist = make([]*Edge, 1)
-  // no exit from 'done'.
+  // no exit from 'done', so no edges.
+  entry.Edgelist[0] = &Edge{ltest, 0}
   ltest.Edgelist[0] = &Edge{body, 0}
+  ltest.Edgelist[1] = &Edge{done, 0}
   body.Edgelist[0] = &Edge{ltest, 0}
 
-  identify_loops(ltest)
-  lassert(t, ltest.InLoop(), "loop test is part of loop")
-  lassert(t, body.InLoop(), "body of course is part of loop")
-  lassert(t, !done.InLoop(), "exit block is not part of loop!")
+  Analyze(entry)
+  lassert(t, ltest.LoopHeader(), "loop test is a loop header")
+  lassert(t, body.Depth() == 1, "body is in the loop")
+  lassert(t, done.LoopHeader() == false, "exit block is not a loop header")
+  lassert(t, done.Depth() == 0, "exit block is not in a loop")
 }
 
 func TestDistance2Node(t *testing.T) {
