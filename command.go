@@ -10,6 +10,7 @@ import "strconv"
 import "strings"
 import "syscall"
 import "github.com/tfogal/ptrace"
+import "code.google.com/p/rsc.x86/x86asm"
 import "./bfd"
 import "./cfg"
 import "./debug"
@@ -317,6 +318,26 @@ func (cwhereami) Execute(inferior *ptrace.Tracee) (error) {
   return nil
 }
 
+// decodes the instruction[s] for the given loop header basic block.
+type cdecode struct{
+  addr string
+}
+func (c cdecode) Execute(inferior *ptrace.Tracee) error {
+  ui, err := strconv.ParseUint(c.addr, 0, 64)
+  if err != nil { return err }
+  address := uintptr(ui)
+
+  // max length of an instruction is 16 bytes.
+  insn := make([]byte, 16)
+  if err := inferior.Read(address, insn) ; err != nil { return err }
+
+  ixn, err := x86asm.Decode(insn, 64)
+  if err != nil { return err }
+  fmt.Printf("insn: %v\n", ixn)
+
+  return nil
+}
+
 func parse_cmdline(line string) (Command) {
   tokens := strings.Split(line, " ")
   if len(tokens) == 0 { return cparseerror{"no tokens"} }
@@ -350,6 +371,9 @@ func parse_cmdline(line string) (Command) {
     case "symlist": fallthrough
     case "symbols": return csymlist{}
     case "whereami": return cwhereami{}
+    case "decode":
+      if len(tokens) != 2 { return cparseerror{"not enough arguments"} }
+      return cdecode{tokens[1]}
     default: return cgeneric{tokens}
   }
 }
