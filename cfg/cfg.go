@@ -167,19 +167,17 @@ func (n *Node) Depth() uint {
   return n.depth-1
 }
 
-func nullset() domset {
-  var dom domset
-  dom.set = make(map[uintptr]bool)
-  return dom
-}
+// returns a null/empty set.
+func nullset() domset { return domset{ set: make(map[uintptr]bool) } }
+
 // unions the two sets together.
 func union(a domset, b domset) domset {
   var dom domset
   dom.set = make(map[uintptr]bool, len(a.set) + len(b.set))
-  for ptr, _ := range a.set {
+  for ptr := range a.set {
     dom.set[ptr] = true
   }
-  for ptr, _ := range b.set {
+  for ptr := range b.set {
     dom.set[ptr] = true
   }
   return dom
@@ -187,7 +185,7 @@ func union(a domset, b domset) domset {
 func intersection(a domset, b domset) domset {
   var result domset
   result.set = make(map[uintptr]bool)
-  for ptrA, _ := range a.set {
+  for ptrA := range a.set {
     _, found := b.set[ptrA]
     if found {
       result.set[ptrA] = true
@@ -202,7 +200,7 @@ func exclude(a domset, elem uintptr) domset {
   return dom
 }
 // construct a singleton set out of the given pointer.
-func set(address uintptr) domset {
+func singleton(address uintptr) domset {
   dom := nullset()
   dom.set[address] = true
   return dom
@@ -214,7 +212,7 @@ func sameset(a domset, b domset) bool {
 // Analyzes a graph, computing all the properties we can.
 func Analyze(root *Node) {
   dominance(root)
-  headers(root)
+  loop_headers(root)
   depth(root)
 }
 
@@ -247,12 +245,12 @@ func build_edgelist_helper(node *Node, seen map[uintptr]bool) []biEdge {
 
 // iterates through the graph, identifying which basic blocks are loop headers.
 // returns nothing: modifies the graph's flags.
-func headers(root *Node) {
+func loop_headers(root *Node) {
   elist := build_edgelist(root)
   seen := make(map[uintptr]bool)
-  headers_helper(root, seen, elist)
+  loop_headers_helper(root, seen, elist)
 }
-func headers_helper(node *Node, seen map[uintptr]bool, elist []biEdge) {
+func loop_headers_helper(node *Node, seen map[uintptr]bool, elist []biEdge) {
   if seen[node.Addr] { return }
   seen[node.Addr] = true
 
@@ -269,7 +267,7 @@ func headers_helper(node *Node, seen map[uintptr]bool, elist []biEdge) {
     }
   }
   for _, e := range node.Edgelist { // recurse.
-    headers_helper(e.To, seen, elist)
+    loop_headers_helper(e.To, seen, elist)
   }
 }
 
@@ -350,7 +348,7 @@ func depthcalc_helper(node *Node, seen map[uintptr]bool, elist []biEdge) {
 // graph itself.
 func dominance(root* Node) {
   // initialize root node's dominance set to just be itself.
-  root.dominators = set(root.Addr)
+  root.dominators = singleton(root.Addr)
   // now recurse on root's children.
   for _, edge := range root.Edgelist {
     dominance_helper(edge.To, root)
@@ -370,16 +368,19 @@ func dominance(root* Node) {
  * time through the graph is, however, a special case in which something always
  * changes. */
 func dominance_helper(chld *Node, parent *Node) {
-  incoming := union(parent.dominators, set(chld.Addr))
-  if sameset(chld.dominators, nullset()) { // first time we're here, init.
+  incoming := union(parent.dominators, singleton(chld.Addr))
+  if chld.dominators.Len() == 0 { // first time we're here, initialize
+  //if sameset(chld.dominators, nullset()) {
     chld.dominators = incoming
   } else {
     // we've been here before.  will our update change anything?
-    if sameset(chld.dominators, intersection(chld.dominators, incoming)) {
+    if isect := intersection(chld.dominators, incoming) ;
+       sameset(chld.dominators, isect) {
       // if it won't change anything, then bail.
       return
+    } else {
+      chld.dominators = isect
     }
-    chld.dominators = intersection(chld.dominators, incoming)
   }
   for _, edge := range chld.Edgelist { // calc dominance of children
     dominance_helper(edge.To, chld)
