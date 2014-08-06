@@ -370,7 +370,6 @@ func dominance(root* Node) {
 func dominance_helper(chld *Node, parent *Node) {
   incoming := union(parent.dominators, singleton(chld.Addr))
   if chld.dominators.Len() == 0 { // first time we're here, initialize
-  //if sameset(chld.dominators, nullset()) {
     chld.dominators = incoming
   } else {
     // we've been here before.  will our update change anything?
@@ -385,36 +384,4 @@ func dominance_helper(chld *Node, parent *Node) {
   for _, edge := range chld.Edgelist { // calc dominance of children
     dominance_helper(edge.To, chld)
   }
-}
-
-
-// reachable in a single step
-func reachable1(target *Node, from *Node) bool {
-  for _, edge := range from.Edgelist {
-    if edge.To == target { return true }
-  }
-  return false
-}
-
-func reachable2(target *Node, from *Node) bool {
-  for _, edge1 := range from.Edgelist {
-    node1 := edge1.To
-    for _, edge2 := range node1.Edgelist {
-      if edge2.To == target { return true }
-    }
-  }
-  return false
-}
-
-func reachable3(target *Node, from *Node) bool {
-  for _, edge1 := range from.Edgelist {
-    node1 := edge1.To
-    for _, edge2 := range node1.Edgelist {
-      node2 := edge2.To
-      for _, edge3 := range node2.Edgelist {
-        if edge3.To == target { return true }
-      }
-    }
-  }
-  return false
 }
