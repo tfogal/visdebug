@@ -252,7 +252,7 @@ func (c ccfg) Execute(inferior *ptrace.Tracee) (error) {
   // only happen if the function lives in a stripped shared library.
   if rn := root_node(graph, symb) ; rn != nil {
     cfg.Analyze(rn)
-    // default to stdout, but can output to a file.  But 'inorder' needs a
+    // output to a file that defaults to stdout.  But 'inorder' needs a
     // 1-argument function, so construct a closure around the appropriate
     // writer.
     writer := os.Stdout
@@ -360,6 +360,40 @@ func (c cdecode) Execute(inferior *ptrace.Tracee) error {
   return nil
 }
 
+// finds the basic block that the given address is part of
+func
+basic_block(graph map[uintptr]*cfg.Node, address uintptr) (*cfg.Node, error) {
+  closest_addr := uintptr(0x0)
+  closest := (*cfg.Node)(nil)
+  for addr, node := range graph {
+    if addr <= address && addr > closest_addr {
+      closest_addr = addr
+      closest = node
+    }
+  }
+  if closest == nil {
+    return nil, fmt.Errorf("could not find any reasonable basic blocks.")
+  }
+  return closest, nil
+}
+
+// identifies the loop bounds for all headers which bound the current location.
+type cbounds struct{}
+func (cbounds) Execute(inferior *ptrace.Tracee) error {
+  symb, err := where(inferior)
+  if err != nil { return err }
+
+  graph := cfg.Local(globals.program, symb.Name())
+  if err != nil { return err }
+
+  bb, err := basic_block(graph, whereis(inferior))
+  if err != nil { return err }
+  fmt.Printf("closest bb to 0x%0x is (%s, 0x%0x)\n", whereis(inferior),
+             bb.Name, bb.Addr)
+
+  return nil
+}
+
 func parse_cmdline(line string) (Command) {
   tokens := strings.Split(line, " ")
   if len(tokens) == 0 { return cparseerror{"no tokens"} }
@@ -396,6 +430,7 @@ func parse_cmdline(line string) (Command) {
     case "decode":
       if len(tokens) != 2 { return cparseerror{"not enough arguments"} }
       return cdecode{tokens[1]}
+    case "bounds": return cbounds{}
     default: return cgeneric{tokens}
   }
 }
