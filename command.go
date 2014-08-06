@@ -323,9 +323,22 @@ type cdecode struct{
   addr string
 }
 func (c cdecode) Execute(inferior *ptrace.Tracee) error {
-  ui, err := strconv.ParseUint(c.addr, 0, 64)
-  if err != nil { return err }
-  address := uintptr(ui)
+  address := uintptr(0x0)
+  // accept "%reg" to mean 'grab the address of from the given register"
+  if strings.Contains(c.addr, "%") { // register reference.
+    regs, err := inferior.GetRegs()
+    if err != nil { return err }
+    switch(c.addr) {
+    case "%rip": address = uintptr(regs.Rip)
+    case "%rbp": address = uintptr(regs.Rbp)
+    case "%rsp": address = uintptr(regs.Rsp)
+    default: return fmt.Errorf("reg '%s' unknown.", c.addr)
+    }
+  } else {
+    ui, err := strconv.ParseUint(c.addr, 0, 64)
+    if err != nil { return err }
+    address = uintptr(ui)
+  }
 
   // max length of an instruction is 16 bytes.
   insn := make([]byte, 16)
