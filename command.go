@@ -4,6 +4,7 @@ package main
 import "bufio"
 import "errors"
 import "fmt"
+import "io"
 import "os"
 import "sort"
 import "strconv"
@@ -120,8 +121,12 @@ func (c cwait) Execute(inferior *ptrace.Tracee) (error) {
     return fmt.Errorf("could not find '%s' among the %d known symbols.",
                       c.funcname, len(symbols))
   }
-  debug.WaitUntil(inferior, sym.Address())
-  fmt.Printf("Hit BP!\n")
+  err := debug.WaitUntil(inferior, sym.Address())
+  if err == io.EOF {
+    fmt.Printf("Program ended before '%s' was hit.\n", c.funcname)
+    return nil
+  }
+  if err != nil { return err }
   return nil
 }
 
@@ -237,14 +242,9 @@ type ccfg struct {
   filename string // output to this file, if set.
 }
 func (c ccfg) Execute(inferior *ptrace.Tracee) (error) {
-  if err := verify_symbols_loaded(inferior) ; err != nil { return err }
-  regs, err := inferior.GetRegs()
-  if err != nil { return err }
-
-  // Ergh.  We have the instruction pointer, but cfg.Local does its filtering
-  // based on the symbol (really, function) *name*.  So we search through our
-  // symbtable and "convert" our current insn ptr to a function name.
-  symb, err := find_function(uintptr(regs.Rip))
+  // cfg.Local does its filtering based on the symbol (really, function) name.
+  // Thus we need to identify where we are within the execution.
+  symb, err := where(inferior)
   if err != nil { return err }
 
   graph := cfg.Local(globals.program, symb.Name())
@@ -302,19 +302,28 @@ func (csymlist) Execute(inferior *ptrace.Tracee) (error) {
   return nil
 }
 
+// identifies the function the inferior is currently located in.
+func where(inferior *ptrace.Tracee) (*bfd.Symbol, error) {
+  if err := verify_symbols_loaded(inferior) ; err != nil { return nil, err }
+  regs, err := inferior.GetRegs()
+  if err != nil { return nil, err }
+
+  symbol, err := find_function(uintptr(regs.Rip))
+  if err != nil { return nil, err }
+  return symbol, nil
+}
+
 // maps the current instruction pointer to a function and then tells the user
 // where they are.
 type cwhereami struct{}
 func (cwhereami) Execute(inferior *ptrace.Tracee) (error) {
-  if err := verify_symbols_loaded(inferior) ; err != nil { return err }
-  regs, err := inferior.GetRegs()
+  symb, err := where(inferior)
+  if err != nil { return err }
+  iptr, err := inferior.GetIPtr()
   if err != nil { return err }
 
-  symb, err := find_function(uintptr(regs.Rip))
-  if err != nil { return err }
-
-  diff := uintptr(regs.Rip) - symb.Address()
-  fmt.Printf("0x%012x  %s+%d\n", uintptr(regs.Rip), symb.Name(), diff)
+  diff := iptr - symb.Address()
+  fmt.Printf("0x%012x  %s+%d\n", iptr, symb.Name(), diff)
   return nil
 }
 
@@ -340,7 +349,7 @@ func (c cdecode) Execute(inferior *ptrace.Tracee) error {
     address = uintptr(ui)
   }
 
-  // max length of an instruction is 16 bytes.
+  // max length of an instruction in x86-64 is 16 bytes (unconfirmed..).
   insn := make([]byte, 16)
   if err := inferior.Read(address, insn) ; err != nil { return err }
 
