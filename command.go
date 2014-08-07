@@ -116,12 +116,22 @@ func (c cwait) Execute(inferior *ptrace.Tracee) (error) {
   if err := verify_symbols_loaded(inferior) ; err != nil {
     return err
   }
-  sym := symbol(c.funcname, symbols) // symbol lookup
-  if sym == nil {
-    return fmt.Errorf("could not find '%s' among the %d known symbols.",
-                      c.funcname, len(symbols))
+  // they can give either an address or the name of an actual function.
+  address := uintptr(0x0)
+  if len(c.funcname) > 2 && c.funcname[0:2] == "0x" {
+    saddr, err := strconv.ParseInt(c.funcname, 0, 64)
+    if err != nil { return err }
+    if saddr < 0 { panic("address cannot be negative, that makes no sense.") }
+    address = uintptr(saddr)
+  } else {
+    sym := symbol(c.funcname, symbols) // symbol lookup
+    if sym == nil {
+      return fmt.Errorf("could not find '%s' among the %d known symbols.",
+                        c.funcname, len(symbols))
+    }
+    address = sym.Address()
   }
-  err := debug.WaitUntil(inferior, sym.Address())
+  err := debug.WaitUntil(inferior, address)
   if err == io.EOF {
     fmt.Printf("Program ended before '%s' was hit.\n", c.funcname)
     return nil
