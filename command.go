@@ -116,7 +116,7 @@ func (c cwait) Execute(inferior *ptrace.Tracee) (error) {
   if err := verify_symbols_loaded(inferior) ; err != nil {
     return err
   }
-  // they can give either an address or the name of an actual function.
+  // they can give us either an address or the name of an actual function.
   address := uintptr(0x0)
   if len(c.funcname) > 2 && c.funcname[0:2] == "0x" {
     saddr, err := strconv.ParseInt(c.funcname, 0, 64)
@@ -337,6 +337,59 @@ func (cwhereami) Execute(inferior *ptrace.Tracee) (error) {
   return nil
 }
 
+// prints out the assembly starting at a given node, until we hit a
+// conditional jump.
+func disassemble_cond(inferior *ptrace.Tracee, node *cfg.Node) error {
+  addr := node.Addr
+  insn := make([]byte, 16) // max length of x86-64 insn is 16 bytes.
+
+  // run through the block until we find a conditional jump, disassembling each
+  // instruction as we go.  this is complicated slightly by unconditional
+  // jumps: we need to be sure to follow them.
+  for {
+    if err := inferior.Read(addr, insn) ; err != nil { return err }
+
+    ixn, err := x86asm.Decode(insn, 64)
+    if err != nil { return err }
+    fmt.Printf("0x%08x: \t%v\n", addr, ixn)
+
+    if ixn.Op == x86asm.JA || ixn.Op == x86asm.JAE ||
+       ixn.Op == x86asm.JB || ixn.Op == x86asm.JBE || ixn.Op == x86asm.JCXZ ||
+       ixn.Op == x86asm.JE || ixn.Op == x86asm.JECXZ || ixn.Op == x86asm.JG ||
+       ixn.Op == x86asm.JGE || ixn.Op == x86asm.JL || ixn.Op == x86asm.JLE ||
+       ixn.Op == x86asm.JNE || ixn.Op == x86asm.JNO || ixn.Op == x86asm.JNP ||
+       ixn.Op == x86asm.JNS || ixn.Op == x86asm.JO || ixn.Op == x86asm.JP ||
+       ixn.Op == x86asm.JRCXZ || ixn.Op == x86asm.JS {
+      // jump instruction.  basic block is done.
+      break
+    }
+    addr += uintptr(ixn.Len)
+    if ixn.Op == x86asm.JMP { // also follow jumps!
+      fmt.Printf("jmp!  args: %v\n", ixn.Args[0])
+      addr += uintptr(ixn.Args[0].(x86asm.Rel))
+    }
+  }
+  return nil
+}
+
+type cdisassemble struct{}
+func (cdisassemble) Execute(inferior *ptrace.Tracee) error {
+  symb, err := where(inferior)
+  if err != nil { return err }
+
+  graph := cfg.Local(globals.program, symb.Name())
+  if err != nil { return err }
+  if rn := root_node(graph, symb) ; rn != nil {
+    cfg.Analyze(rn)
+  }
+
+  bb, err := basic_block(graph, whereis(inferior))
+  if err != nil { return err }
+
+  disassemble_cond(inferior, bb)
+  return nil
+}
+
 // decodes the instruction[s] for the given loop header basic block.
 type cdecode struct{
   addr string
@@ -387,10 +440,21 @@ basic_block(graph map[uintptr]*cfg.Node, address uintptr) (*cfg.Node, error) {
   return closest, nil
 }
 
-func print_bindlist(node *cfg.Node) {
+func print_bindlist(node *cfg.Node, inferior *ptrace.Tracee) {
   for _, hdr := range node.Headers {
-    fmt.Printf("0x%0x is bound by (%s, 0x%0x)\n", node.Addr, hdr.Name, hdr.Addr)
-    print_bindlist(hdr)
+    fmt.Printf("0x%08x", node.Addr)
+    if node.LoopHeader() {
+      fmt.Printf(",LH(%d)", node.Depth())
+    } else {
+      fmt.Printf("      ") // just keep it evenly spaced.
+    }
+    fmt.Printf(" is bound by 0x%0x", hdr.Addr)
+    if hdr.LoopHeader() { fmt.Printf(",LHd(%d)", hdr.Depth()) }
+    fmt.Printf("\n")
+    if hdr.LoopHeader() {
+      disassemble_cond(inferior, hdr)
+    }
+    print_bindlist(hdr, inferior)
   }
 }
 // identifies the loop bounds for all headers which bound the current location.
@@ -409,8 +473,24 @@ func (cbounds) Execute(inferior *ptrace.Tracee) error {
   if err != nil { return err }
   fmt.Printf("closest bb to 0x%0x is (%s, 0x%0x)\n", whereis(inferior),
              bb.Name, bb.Addr)
-  print_bindlist(bb)
+  print_bindlist(bb, inferior)
 
+  return nil
+}
+
+// reads from memory at the given location and prints it out.
+type cread struct{
+  location string
+}
+func (c cread) Execute(inferior *ptrace.Tracee) error {
+  ui, err := strconv.ParseUint(c.location, 0, 64)
+  if err != nil { return err }
+  address := uintptr(ui)
+
+  word, err := inferior.ReadWord(address)
+  if err != nil { return err }
+
+  fmt.Printf("0x%08x\n", word)
   return nil
 }
 
@@ -451,6 +531,10 @@ func parse_cmdline(line string) (Command) {
       if len(tokens) != 2 { return cparseerror{"not enough arguments"} }
       return cdecode{tokens[1]}
     case "bounds": return cbounds{}
+    case "disassemble": return cdisassemble{}
+    case "read":
+      if len(tokens) == 1 { return cparseerror{"not enough arguments"} }
+      return cread{tokens[1]}
     default: return cgeneric{tokens}
   }
 }
