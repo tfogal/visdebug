@@ -377,6 +377,12 @@ basic_block(graph map[uintptr]*cfg.Node, address uintptr) (*cfg.Node, error) {
   return closest, nil
 }
 
+func print_bindlist(node *cfg.Node) {
+  for _, hdr := range node.Headers {
+    fmt.Printf("0x%0x is bound by (%s, 0x%0x)\n", node.Addr, hdr.Name, hdr.Addr)
+    print_bindlist(hdr)
+  }
+}
 // identifies the loop bounds for all headers which bound the current location.
 type cbounds struct{}
 func (cbounds) Execute(inferior *ptrace.Tracee) error {
@@ -385,11 +391,15 @@ func (cbounds) Execute(inferior *ptrace.Tracee) error {
 
   graph := cfg.Local(globals.program, symb.Name())
   if err != nil { return err }
+  if rn := root_node(graph, symb) ; rn != nil {
+    cfg.Analyze(rn)
+  }
 
   bb, err := basic_block(graph, whereis(inferior))
   if err != nil { return err }
   fmt.Printf("closest bb to 0x%0x is (%s, 0x%0x)\n", whereis(inferior),
              bb.Name, bb.Addr)
+  print_bindlist(bb)
 
   return nil
 }
