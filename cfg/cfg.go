@@ -37,9 +37,10 @@ type Node struct {
   flags uint
   dominators domset
   depth uint
+  Headers []*Node // the set of loop headers that this node is a part of
 }
 func makeNode(name string, addr uintptr) *Node {
-  return &Node{name, addr, nil, 0, nullset(), 0}
+  return &Node{name, addr, nil, 0, nullset(), 0, nil}
 }
 
 func (n *Node) String() string {
@@ -321,6 +322,7 @@ func depthcalc_helper(node *Node, seen map[uintptr]bool, elist []biEdge) {
   }
   // the depth of a block is the depth of the most-enclosing loop header, +1
   max_depth := uint(0)
+  node.Headers = make([]*Node, 0)
   for d := range node.dominators.set {
     n := addr_to_node(d, elist)
     // elist has no record of the node if there are no edges... but if the node
@@ -336,6 +338,10 @@ func depthcalc_helper(node *Node, seen map[uintptr]bool, elist []biEdge) {
     delete(other_doms.set, node.Addr)
     if n.LoopHeader() && reachable(n, node, other_doms.set) {
       if n.depth > max_depth { max_depth = n.depth }
+      // can the length of this ever actually exceed 1?  do we need an array?
+      node.Headers = append(node.Headers, n)
+      // delete this if you ever hit it, i'm just curious:
+      if len(node.Headers) > 1 { panic("more than one header?") }
     }
   }
   node.depth = max_depth + 1
