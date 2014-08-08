@@ -35,13 +35,20 @@ __attribute__((noinline)) static void smooth2(float* v) {
   /* blah for correctness we need to do sides and bottom too, but blah. */
 }
 
-#define IDX3(x,y,z) v[(z)*dims[0]*dims[1] + (y)*dims[0] + x]
+#define IDX3(x,y,z) ({ \
+  const size_t x0 = x < 0 ? 0 : (size_t)x >= dims[0] ? dims[0]-1 : (size_t)x; \
+  const size_t y0 = y < 0 ? 0 : (size_t)y >= dims[1] ? dims[1]-1 : (size_t)y; \
+  const size_t z0 = z < 0 ? 0 : (size_t)z >= dims[2] ? dims[2]-1 : (size_t)z; \
+  v[(z0)*dims[0]*dims[1] + (y0)*dims[0] + x0]; \
+})
+
 __attribute__((noinline)) static void smooth3(float* v) {
-  for(size_t k=1; k < dims[2]-1; ++k) {
-    for(size_t j=1; j < dims[1]-1; ++j) {
-      for(size_t i=1; i < dims[0]-1; ++i) {
-        /* hack, doesn't do what it says but still 3D at least.. */
-        IDX3(i,j,k) = (IDX3(i-1,j,k) + IDX3(i,j,k) + IDX3(i+1,j,k)) / 3.0f;
+  for(int64_t k=0; (size_t)k < dims[2]; ++k) {
+    for(int64_t j=0; (size_t)j < dims[1]; ++j) {
+      for(int64_t i=0; (size_t)i < dims[0]; ++i) {
+        const size_t idx = (size_t)k*dims[0]*dims[1] + (size_t)j*dims[0] + i;
+        /* hack, doesn't do what it says but still 3D loop at least.. */
+        v[idx] = (IDX3(i-1,j,k) + IDX3(i,j,k) + IDX3(i+1,j,k)) / 3.0f;
       }
     }
   }
