@@ -147,18 +147,37 @@ func (c cparseerror) Execute(*ptrace.Tracee) (error) {
   return fmt.Errorf("parse error: %s", c.reason)
 }
 
-type cregisters struct{}
-func (cregisters) Execute(inferior *ptrace.Tracee) (error) {
+type cregisters struct{
+  regname string
+}
+func (c cregisters) Execute(inferior *ptrace.Tracee) (error) {
   regs, err := inferior.GetRegs()
   if err != nil { return err }
 
   wd, err := inferior.ReadWord(uintptr(regs.Rip))
   if err != nil { return err }
 
-  fmt.Printf("%9s %14s %14s %13s %21s\n", "iptr", "RAX", "RBP", "RSP",
-             "next-opcode")
-  fmt.Printf("0x%012x 0x%012x 0x%012x 0x%012x 0x%012x\n", regs.Rip, regs.Rax,
-             regs.Rbp, regs.Rsp, wd)
+  switch c.regname {
+  case "":
+    fmt.Printf("%9s %14s %14s %13s %21s\n", "iptr", "RAX", "RBP", "RSP",
+               "next-opcode")
+    fmt.Printf("0x%012x 0x%012x 0x%012x 0x%012x 0x%012x\n", regs.Rip, regs.Rax,
+               regs.Rbp, regs.Rsp, wd)
+  case "rax": fmt.Printf("0x%012x\n", regs.Rax)
+  case "rbx": fmt.Printf("0x%012x\n", regs.Rbx)
+  case "rcx": fmt.Printf("0x%012x\n", regs.Rcx)
+  case "rdx": fmt.Printf("0x%012x\n", regs.Rdx)
+  case "rdi": fmt.Printf("0x%012x\n", regs.Rdi)
+  case "rsi": fmt.Printf("0x%012x\n", regs.Rsi)
+  case "r8": fmt.Printf("0x%012x\n", regs.R8)
+  case "r9": fmt.Printf("0x%012x\n", regs.R9)
+  case "r10": fmt.Printf("0x%012x\n", regs.R10)
+  case "r11": fmt.Printf("0x%012x\n", regs.R11)
+  case "r12": fmt.Printf("0x%012x\n", regs.R12)
+  case "r13": fmt.Printf("0x%012x\n", regs.R13)
+  case "r14": fmt.Printf("0x%012x\n", regs.R14)
+  case "r15": fmt.Printf("0x%012x\n", regs.R15)
+  }
   return nil
 }
 
@@ -512,7 +531,9 @@ func parse_cmdline(line string) (Command) {
       if len(tokens) == 1 { return cparseerror{"not enough arguments"} }
       return cwait{tokens[1]}
     case "regs": fallthrough
-    case "registers": return cregisters{}
+    case "registers":
+      if len(tokens) == 2 { return cregisters{tokens[1]} }
+      return cregisters{""}
     case "sym": fallthrough
     case "symbol":
       if len(tokens) == 1 { return cparseerror{"not enough arguments"} }
