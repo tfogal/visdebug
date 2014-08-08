@@ -356,6 +356,16 @@ func (cwhereami) Execute(inferior *ptrace.Tracee) (error) {
   return nil
 }
 
+func conditional_jump(ixn x86asm.Inst) bool {
+  return ixn.Op == x86asm.JA || ixn.Op == x86asm.JAE || ixn.Op == x86asm.JB ||
+         ixn.Op == x86asm.JBE || ixn.Op == x86asm.JCXZ ||
+         ixn.Op == x86asm.JE || ixn.Op == x86asm.JECXZ || ixn.Op == x86asm.JG ||
+         ixn.Op == x86asm.JGE || ixn.Op == x86asm.JL || ixn.Op == x86asm.JLE ||
+         ixn.Op == x86asm.JNE || ixn.Op == x86asm.JNO || ixn.Op == x86asm.JNP ||
+         ixn.Op == x86asm.JNS || ixn.Op == x86asm.JO || ixn.Op == x86asm.JP ||
+         ixn.Op == x86asm.JRCXZ || ixn.Op == x86asm.JS;
+}
+
 // prints out the assembly starting at a given node, until we hit a
 // conditional jump.
 func disassemble_cond(inferior *ptrace.Tracee, node *cfg.Node) error {
@@ -372,14 +382,7 @@ func disassemble_cond(inferior *ptrace.Tracee, node *cfg.Node) error {
     if err != nil { return err }
     fmt.Printf("0x%08x: \t%v\n", addr, ixn)
 
-    if ixn.Op == x86asm.JA || ixn.Op == x86asm.JAE ||
-       ixn.Op == x86asm.JB || ixn.Op == x86asm.JBE || ixn.Op == x86asm.JCXZ ||
-       ixn.Op == x86asm.JE || ixn.Op == x86asm.JECXZ || ixn.Op == x86asm.JG ||
-       ixn.Op == x86asm.JGE || ixn.Op == x86asm.JL || ixn.Op == x86asm.JLE ||
-       ixn.Op == x86asm.JNE || ixn.Op == x86asm.JNO || ixn.Op == x86asm.JNP ||
-       ixn.Op == x86asm.JNS || ixn.Op == x86asm.JO || ixn.Op == x86asm.JP ||
-       ixn.Op == x86asm.JRCXZ || ixn.Op == x86asm.JS {
-      // jump instruction.  basic block is done.
+    if conditional_jump(ixn) { // jump instruction.  basic block is done.
       break
     }
     addr += uintptr(ixn.Len)
