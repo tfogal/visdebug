@@ -294,11 +294,8 @@ var needed = []needed_sym{
  * address. */
 func SymbolsProcess(inferior *ptrace.Tracee) ([]Symbol, error) {
   filename := fmt.Sprintf("/proc/%d/exe", inferior.PID())
-  file, err := os.Open(filename)
-  if err != nil { return nil, err }
-  defer file.Close()
 
-  symbols, err := read_symbols_file(file)
+  symbols, err := Symbols(filename)
   if err != nil { return nil, err }
 
   fmt.Fprintf(strm, "read %d symbols.\n", len(symbols))
