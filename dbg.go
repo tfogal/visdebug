@@ -94,8 +94,8 @@ func inorder(graph map[uintptr]*cfg.Node, f gfunc) {
 // visited.
 func inorder_helper(node *cfg.Node, seen map[uintptr]bool, f gfunc) {
   if seen[node.Addr] { return }
-  f(node)
   seen[node.Addr] = true
+  f(node)
   for _, edge := range node.Edgelist {
     inorder_helper(edge.To, seen, f)
   }

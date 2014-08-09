@@ -2,6 +2,8 @@
 package main
 
 import "bufio"
+import "bytes"
+import "encoding/binary"
 import "errors"
 import "fmt"
 import "io"
@@ -486,6 +488,120 @@ func print_bindlist(node *cfg.Node, inferior *ptrace.Tracee) {
     print_bindlist(hdr, inferior)
   }
 }
+
+// x86asm.Args is always 4 elements, regardless of how many arguments the
+// instruction takes.  if it takes fewer than 4, the 'extra' arguments will be
+// nil.
+func nargs(args x86asm.Args) uint {
+  n := uint(0)
+  for _, a := range args {
+    if a != nil { n++ }
+  }
+  return n
+}
+
+func opcode_in(opcode x86asm.Op, ops []x86asm.Op) bool {
+  for _, o := range ops {
+    if o == opcode {
+      return true
+    }
+  }
+  return false
+}
+
+// starting from 'startaddr', find the next instruction which has the given
+// opcode and 2 arguments, the first of which is the register given by 'reg'
+// and the latter a memory reference.
+// This will error out if it hits a conditional jump: start it from the basic
+// block you care about.
+func find_2regmem(opcodes []x86asm.Op, reg x86asm.Reg, startaddr uintptr,
+                  inferior *ptrace.Tracee) (x86asm.Inst, uintptr, error) {
+  insn := make([]byte, 16)
+  addr := startaddr
+  bad := x86asm.Inst{} // just a constant to return on error.
+  for {
+    if err := inferior.Read(addr, insn) ; err != nil { return bad, 0x0, err }
+
+    ixn, err := x86asm.Decode(insn, 64)
+    if err != nil { return bad, 0x0, err }
+
+    if conditional_jump(ixn) {
+      return bad, 0x0, errors.New("exited basic block before hitting opcode!")
+    }
+
+    if opcode_in(ixn.Op, opcodes) && nargs(ixn.Args) == 2 {
+      _, isreg := ixn.Args[0].(x86asm.Reg)
+      memref, ismem := ixn.Args[1].(x86asm.Mem)
+      if isreg && ismem && memref.Base == reg {
+        return ixn, addr, nil
+      }
+    }
+
+    addr += uintptr(ixn.Len)
+    if ixn.Op == x86asm.JMP {
+      addr += uintptr(ixn.Args[0].(x86asm.Rel))
+    }
+  }
+  return bad, 0x0, errors.New("inconceivable!") // not reachable.
+}
+
+// this is garbage.  we shouldn't need to hardcode this in.
+func endianconvert(u uint64) uint64 {
+  buf := bytes.NewBuffer(make([]byte, 0))
+  binary.Write(buf, binary.BigEndian, u)
+  bts := buf.Bytes()
+  val := uint64(0)
+  for i:=uint(0); i < uint(len(bts)) ; i++ {
+    val |= uint64(bts[i]) << i
+  }
+  return val
+}
+
+// identify the bounds of the loop[s] of where we are now.
+// note this will execute the inferior a little bit.
+func bind_identify(node *cfg.Node, inferior *ptrace.Tracee) ([]uint, error) {
+  dims := make([]uint, 0)
+  for _, hdr := range node.Headers {
+    if !hdr.LoopHeader() { panic("non-header in header list!") }
+    if hdr.LoopHeader() {
+      ixn, mraddr, err := find_2regmem([]x86asm.Op{x86asm.MOV, x86asm.CMP},
+                                       x86asm.RIP, hdr.Addr, inferior)
+      if err != nil { return nil, err }
+      memref := ixn.Args[1].(x86asm.Mem)
+      if memref.Base != x86asm.RIP { panic("found wrong insn") }
+      if memref.Disp < 0x10 { panic("displacement makes no sense") }
+
+/*
+      fmt.Printf("memref info:\n\tseg: %v\n\tbase: %v\n\tscale: %v\n",
+                 memref.Segment, memref.Base, memref.Scale)
+      fmt.Printf("\tindex: %v\n\tdisp: 0x%0x\n", memref.Index, memref.Disp)
+*/
+      // now wait until we hit that instruction, whatever it is.
+      if err := debug.WaitUntil(inferior, mraddr) ; err != nil {
+        return nil, err
+      }
+
+      // now that we're here, we can compute the memory reference address and
+      // read the value we are looking for.
+      regs, err := inferior.GetRegs()
+      if err != nil { return nil, err }
+      mr := uintptr(regs.Rip) + uintptr(memref.Disp)
+      // this is bad news if the variable is not 64bits wide...
+      val, err := inferior.ReadWord(mr)
+      if err != nil { return nil, err }
+      val = endianconvert(val) // why do we need this?!
+
+      dims = append(dims, uint(val))
+    }
+    subdims, err := bind_identify(hdr, inferior)
+    if err != nil { return nil, err }
+    for _, x := range subdims {
+      dims = append(dims, x)
+    }
+  }
+  return dims, nil
+}
+
 // identifies the loop bounds for all headers which bound the current location.
 type cbounds struct{}
 func (cbounds) Execute(inferior *ptrace.Tracee) error {
@@ -504,6 +620,32 @@ func (cbounds) Execute(inferior *ptrace.Tracee) error {
              bb.Name, bb.Addr)
   print_bindlist(bb, inferior)
 
+  return nil
+}
+
+// identify loop bounds.  assumes we are inside a series of nested loops.  will
+// execute the inferior some to identify these loops.
+type cboundid struct{}
+func (cboundid) Execute(inferior *ptrace.Tracee) error {
+  symb, err := where(inferior)
+  if err != nil { return err }
+
+  graph := cfg.Local(globals.program, symb.Name())
+  if err != nil { return err }
+  if rn := root_node(graph, symb) ; rn != nil {
+    cfg.Analyze(rn)
+  }
+
+  bb, err := basic_block(graph, whereis(inferior))
+  if err != nil { return err }
+
+  dims, err := bind_identify(bb, inferior)
+  if err != nil { return err }
+  if len(dims) == 0 {
+    if len(bb.Headers) != 0 { panic("broken Headers definition ?") }
+    return errors.New("not currently in a loop.")
+  }
+  fmt.Printf("dims: %v\n", dims)
   return nil
 }
 
@@ -566,6 +708,7 @@ func parse_cmdline(line string) (Command) {
     case "read":
       if len(tokens) == 1 { return cparseerror{"not enough arguments"} }
       return cread{tokens[1]}
+    case "boundid": return cboundid{}
     default: return cgeneric{tokens}
   }
 }
