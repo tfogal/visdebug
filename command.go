@@ -6,6 +6,7 @@ import "errors"
 import "fmt"
 import "io"
 import "os"
+import "os/exec"
 import "sort"
 import "strconv"
 import "strings"
@@ -266,6 +267,11 @@ func root_node(graph map[uintptr]*cfg.Node, symb *bfd.Symbol) *cfg.Node {
   return nil
 }
 
+func viewcfg(filename string) {
+  cmd := exec.Command("viewcfg", filename)
+  cmd.Start()
+}
+
 // build CFG for local function
 type ccfg struct {
   filename string // output to this file, if set.
@@ -300,6 +306,7 @@ func (c ccfg) Execute(inferior *ptrace.Tracee) (error) {
         return err
       }
       fmt.Printf("Output '%s' successfully created.\n", c.filename)
+      viewcfg(c.filename)
     }
   } else {
     fmt.Printf("Cannot find root node of %d-element graph!\n", len(graph))
