@@ -13,8 +13,6 @@ import "unsafe"
 
 const(
   loopHeader = 1 << iota // comparison point of a loop
-  entry      = 1 << iota // entry point of a function
-  exit       = 1 << iota
 )
 
 // set for keeping track of per-node dominance.  all corresponding functions
