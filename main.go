@@ -100,7 +100,7 @@ func main() {
   if(dotcfg) {
     graph := cfg.Build(argv[0])
     root := findNodeByName(graph, "main")
-    assert(root != nil)
+    if root == nil { panic("CFG broken?  no 'main' node") }
     cfg.Analyze(root)
     fmt.Printf("digraph %s {\n", basename(argv[0]))
     printer := func(node *cfg.Node) { dotNode(node, os.Stdout) }
@@ -359,7 +359,7 @@ func replace(slice []uint8, word uint32) {
   buf := bytes.NewBuffer(slice)
   binary.Write(buf, binary.LittleEndian, word)
   bts := buf.Bytes()
-  assert(len(slice) == 4) // word is 4 bytes, so ...
+  if len(slice) != 4 { panic("uint32 should give us a 4 byte quantity...") }
   slice[0] = bts[0]
   slice[1] = bts[1]
   slice[2] = bts[2]

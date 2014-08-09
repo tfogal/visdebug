@@ -177,8 +177,8 @@ find_helper(node *cfg.Node, seen map[uintptr]bool, name string) (*cfg.Node) {
 
 // linear interpolate
 func lerp(val uint, imin uint,imax uint, omin uint,omax uint) (uint) {
-  assert(imin <= imax)
-  assert(omin < omax)
+  if !(imin <= imax) { panic("input parameter range makes no sense.") }
+  if !(omin < omax) { panic("output parameter range makes no sense") }
   return uint(float64(omin) + float64(val-imin) *
                               float64(omax-omin) / float64(imax-imin))
 }
