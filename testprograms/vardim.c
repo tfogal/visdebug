@@ -34,11 +34,25 @@ __attribute__((noinline)) static void smooth2(float* v) {
   }
   /* blah for correctness we need to do sides and bottom too, but blah. */
 }
+static size_t clamp(int64_t v, size_t max) {
+  if(v < 0) {
+    return 0;
+  }
+  if(v >= (int64_t)max) {
+    return max-1;
+  }
+  return v;
+}
+/*
+  const size_t x0 = x < 0 ? 0 : (size_t)x >= dims[0] ? dims[0]-1 : (size_t)x;
+  const size_t y0 = y < 0 ? 0 : (size_t)y >= dims[1] ? dims[1]-1 : (size_t)y;
+  const size_t z0 = z < 0 ? 0 : (size_t)z >= dims[2] ? dims[2]-1 : (size_t)z;
+*/
 
 #define IDX3(x,y,z) ({ \
-  const size_t x0 = x < 0 ? 0 : (size_t)x >= dims[0] ? dims[0]-1 : (size_t)x; \
-  const size_t y0 = y < 0 ? 0 : (size_t)y >= dims[1] ? dims[1]-1 : (size_t)y; \
-  const size_t z0 = z < 0 ? 0 : (size_t)z >= dims[2] ? dims[2]-1 : (size_t)z; \
+  const size_t x0 = clamp(x, dims[0]); \
+  const size_t y0 = clamp(y, dims[1]); \
+  const size_t z0 = clamp(z, dims[2]); \
   v[(z0)*dims[0]*dims[1] + (y0)*dims[0] + x0]; \
 })
 
@@ -47,7 +61,7 @@ __attribute__((noinline)) static void smooth3(float* v) {
     for(int64_t j=0; (size_t)j < dims[1]; ++j) {
       for(int64_t i=0; (size_t)i < dims[0]; ++i) {
         const size_t idx = (size_t)k*dims[0]*dims[1] + (size_t)j*dims[0] + i;
-        /* hack, doesn't do what it says but still 3D loop at least.. */
+        /* technically 1D, but whatever... */
         v[idx] = (IDX3(i-1,j,k) + IDX3(i,j,k) + IDX3(i+1,j,k)) / 3.0f;
       }
     }
