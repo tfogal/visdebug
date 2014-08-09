@@ -51,10 +51,6 @@ func (n *Node) String() string {
   return buf.String()
 }
 
-func assert(conditional bool) {
-  if false == conditional { panic("assertion failure") }
-}
-
 // converts the C graph structure into a Go graph structure.  Takes ownership
 // of 'ccfg' and deallocates it.
 func go_graph(ccfg *C.struct_node, nnodes uint) map[uintptr]*Node {
@@ -63,12 +59,13 @@ func go_graph(ccfg *C.struct_node, nnodes uint) map[uintptr]*Node {
   header.Cap = int(nnodes)
   header.Len = int(nnodes)
   header.Data = uintptr(unsafe.Pointer(ccfg))
+  if nnodes != uint(len(gocfg)) { panic("sizes do not match!") }
 
   // convert the returned data into Go data.  Note this also does a
   // transformation from arrays-of-arrays to an actual graph structure.
   cfg := make(map[uintptr]*Node)
 
-  for i:=uint(0); i < nnodes; i++ {
+  for i := range gocfg {
     addr := uintptr(gocfg[i].addr)
     nedges := uint(gocfg[i].edges)
     // the node could have been created as a target of a previous edge, but if
@@ -88,7 +85,8 @@ func go_graph(ccfg *C.struct_node, nnodes uint) map[uintptr]*Node {
     hdr.Len = int(nedges)
     hdr.Data = uintptr(unsafe.Pointer(gocfg[i].edgelist))
 
-    for e:=uint(0); e < nedges; e++ {
+    if nedges != uint(len(goedgelist)) { panic("sizes do not match!") }
+    for e := range goedgelist {
       dest := uintptr(goedgelist[e].to)
       // if we don't already have a node for this edge, create a temporary one.
       // At another iteration through our outer loop, we'll see the address
@@ -100,12 +98,12 @@ func go_graph(ccfg *C.struct_node, nnodes uint) map[uintptr]*Node {
         To: cfg[dest],
         flags: uint(goedgelist[e].flags),
       }
-      assert(addr == uintptr(goedgelist[e].from))
+      if addr != uintptr(goedgelist[e].from) { panic("invalid previous addr") }
     }
   }
 
   // now cleanup memory.
-  for i:=uint(0); i < nnodes; i++ {
+  for i := range gocfg {
     C.free(unsafe.Pointer(gocfg[i].edgelist))
   }
   C.free(unsafe.Pointer(ccfg))
