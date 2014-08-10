@@ -74,12 +74,11 @@ func WaitUntil(inferior *ptrace.Tracee, address uintptr) error {
   stat := <- inferior.Events()
   status := stat.(syscall.WaitStatus)
   // maybe it didn't get hit at all?  program could have ended.
-  if status.Exited() || status.StopSignal() == syscall.SIGCHLD { return io.EOF
-}
-  if status.CoreDump() {
-    return errors.New("abnormal termination, core dumped")
-  }
-  if status.StopSignal() != syscall.SIGTRAP {
+  switch {
+  case status.Exited() || status.StopSignal() == syscall.SIGCHLD:
+    return io.EOF
+  case status.CoreDump(): return errors.New("abnormal termination, core dumped")
+  case status.StopSignal() != syscall.SIGTRAP:
     return fmt.Errorf("unexpected signal %d", status.StopSignal())
   }
 
