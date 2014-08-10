@@ -90,5 +90,11 @@ func WaitUntil(inferior *ptrace.Tracee, address uintptr) error {
     return err
   }
 
+  iptr, err := inferior.GetIPtr()
+  if err != nil { return err }
+  if iptr != address {
+    panic("stopped somewhere else; maybe we hit a different breakpoint?")
+  }
+
   return nil
 }
