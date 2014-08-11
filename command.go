@@ -409,7 +409,10 @@ func (cdisassemble) Execute(inferior *ptrace.Tracee) error {
   if err != nil { return err }
 
   graph := cfg.Local(globals.program, symb.Name())
-  if err != nil { return err }
+  if len(graph) == 0 {
+    return fmt.Errorf("could not build local CFG for %s@0x%0x", symb.Name(),
+                      symb.Address())
+  }
   if rn := root_node(graph, symb) ; rn != nil {
     cfg.Analyze(rn)
   }
@@ -466,7 +469,7 @@ basic_block(graph map[uintptr]*cfg.Node, address uintptr) (*cfg.Node, error) {
     }
   }
   if closest == nil {
-    return nil, fmt.Errorf("could not find any reasonable basic blocks.")
+    return nil, fmt.Errorf("no reasonable BBs out of %d", len(graph))
   }
   return closest, nil
 }
