@@ -279,12 +279,12 @@ type ccfg struct {
   filename string // output to this file, if set.
 }
 func (c ccfg) Execute(inferior *ptrace.Tracee) (error) {
-  // cfg.Local does its filtering based on the symbol (really, function) name.
+  // cfg.FromAddress needs the entry point of the function.
   // Thus we need to identify where we are within the execution.
   symb, err := where(inferior)
   if err != nil { return err }
 
-  graph := cfg.Local(globals.program, symb.Name())
+  graph := cfg.FromAddress(globals.program, symb.Address())
   // sometimes it seems we are unable to find the root node.  this appears to
   // only happen if the function lives in a stripped shared library.
   if rn := root_node(graph, symb) ; rn != nil {
@@ -408,7 +408,7 @@ func (cdisassemble) Execute(inferior *ptrace.Tracee) error {
   symb, err := where(inferior)
   if err != nil { return err }
 
-  graph := cfg.Local(globals.program, symb.Name())
+  graph := cfg.FromAddress(globals.program, symb.Address())
   if len(graph) == 0 {
     return fmt.Errorf("could not build local CFG for %s@0x%0x", symb.Name(),
                       symb.Address())
@@ -611,7 +611,7 @@ func (cbounds) Execute(inferior *ptrace.Tracee) error {
   symb, err := where(inferior)
   if err != nil { return err }
 
-  graph := cfg.Local(globals.program, symb.Name())
+  graph := cfg.FromAddress(globals.program, symb.Address())
   if err != nil { return err }
   if rn := root_node(graph, symb) ; rn != nil {
     cfg.Analyze(rn)
@@ -633,7 +633,7 @@ func (cboundid) Execute(inferior *ptrace.Tracee) error {
   symb, err := where(inferior)
   if err != nil { return err }
 
-  graph := cfg.Local(globals.program, symb.Name())
+  graph := cfg.FromAddress(globals.program, symb.Address())
   if err != nil { return err }
   if rn := root_node(graph, symb) ; rn != nil {
     cfg.Analyze(rn)
