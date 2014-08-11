@@ -129,7 +129,11 @@ func interactive(argv []string) {
   }
   <- proc.Events() // eat initial 'process is starting' notification.
   defer proc.Close()
-  MainSync(argv[0], proc)
+
+  if err := MainSync(argv[0], proc) ; err != nil {
+    fmt.Printf("could not synchronize main! %v\n", err)
+    return
+  }
 
   cmds := Commands(CmdGlobal{argv[0]})
 
@@ -260,7 +264,10 @@ func mallocs(argv []string) {
   <- inferior.Events() // eat initial 'process is starting' notification.
   defer inferior.Close()
 
-  MainSync(argv[0], inferior)
+  if err := MainSync(argv[0], inferior) ; err != nil {
+    fmt.Printf("main sync failed: %v\n", err)
+    return
+  }
 
   symbols, err := bfd.SymbolsProcess(inferior)
   if err != nil {
@@ -341,7 +348,10 @@ func show_free_space(argv []string) {
   }
   defer inferior.Close()
   <-inferior.Events() // eat initial 'process is starting' notification.
-  MainSync(argv[0], inferior) // run until we hit main, then pause.
+  if err := MainSync(argv[0], inferior) ; err != nil { // run until main
+    fmt.Printf("could not sync with main: %v\n", err)
+    return
+  }
 
   symbols, err := bfd.SymbolsProcess(inferior)
   if err != nil { log.Fatalf("could not read smbols: %v\n", err) }
