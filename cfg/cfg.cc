@@ -1,3 +1,7 @@
+// Various routines for building the CFG using DynInst.
+// Note that we use C allocation routines all over the place, here, because
+// we want to pass memory we create to other languages and it's way easier to
+// call 'free' than 'delete' from other languages.
 #include <cassert>
 #include <cerrno>
 #include <cinttypes>
@@ -23,7 +27,8 @@ static void free_nodes(struct node* nds, size_t nodes);
 static bool filter = false;
 /* produce a dot-format output instead of a default custom output? */
 static bool dot = false;
-const char* local = NULL;
+static const char* local = NULL;
+static const char* addr = NULL;
 
 int
 main(int argc, char* argv[])
@@ -33,6 +38,7 @@ main(int argc, char* argv[])
     if(strcmp(argv[a], "-dot") == 0) { dot = true; }
     if(strcmp(argv[a], "-filter") == 0) { filter = true; }
     if(strcmp(argv[a], "-local") == 0) { local = argv[a+1]; }
+    if(strcmp(argv[a], "-address") == 0) { addr = argv[a+1]; }
   }
 
   if(dot) {
@@ -40,7 +46,10 @@ main(int argc, char* argv[])
   } else {
     size_t nodes;
     struct node* nds;
-    if(local == NULL) {
+    if(addr != NULL) {
+      unsigned long addrl = strtoul(addr, NULL, 16);
+      nds = cfg_address(argv[1], uintptr_t(addrl), &nodes);
+    } else if(local == NULL) {
       nds = cfg(argv[1], &nodes);
     } else {
       nds = cfgLocal(argv[1], local, &nodes);
@@ -108,6 +117,22 @@ static size_t nblocks(const CodeObject::funclist& fqns,
   return blocks;
 }
 
+PURE static size_t
+nblocks_fqn(const Function* fqn)
+{
+  std::map<Address, bool> seen;
+  size_t blocks = 0;
+  for(const Block* blk : fqn->blocks()) {
+    assert(blk->start() != 0x0);
+    // don't get stuck in loops
+    if(seen.find(blk->start()) != seen.end()) { continue; }
+    seen[blk->start()] = true;
+    blocks++;
+  }
+  return blocks;
+}
+
+
 // builds the CFG, but ignores functions which pass the predicate.
 static struct node*
 cfg_filter(const char* program, std::function<bool(Function*)>& filter,
@@ -174,6 +199,55 @@ cfg_filter(const char* program, std::function<bool(Function*)>& filter,
   return nodes;
 }
 
+static struct node*
+cfg_from_fqn(Function* fqn, size_t* n_nodes)
+{
+  std::map<Address, bool> seen;
+
+  // use malloc to allocate so Go can use free.
+  constexpr size_t sznode = sizeof(struct node);
+  struct node* nodes = (struct node*)calloc(nblocks_fqn(fqn), sznode);
+  if(nodes == NULL) {
+    errno = ENOMEM;
+    *n_nodes = 0;
+    return NULL;
+  }
+  *n_nodes = nblocks_fqn(fqn);
+
+  std::cout << *n_nodes << " nodes in the cfg for fqn " << fqn->name() << "\n";
+  assert(!internalfqn(fqn));
+
+  size_t n=0;
+  for(const Block* blk : fqn->blocks()) {
+    assert(blk->start() != 0x0);
+    // detect loops and bail if so.
+    if(seen.find(blk->start()) != seen.end()) { continue; }
+    seen[blk->start()] = true;
+
+    assert(n < *n_nodes);
+    nodes[n].addr = blk->start();
+    nodes[n].name = NULL;
+    if(blk->start() == fqn->addr()) {
+      nodes[n].name = strdup(fqn->name().c_str());
+    }
+    constexpr size_t egsz = sizeof(struct edge);
+    nodes[n].edgelist = (struct edge*)malloc(egsz*blk->targets().size());
+    nodes[n].edges = blk->targets().size();
+
+    size_t e = 0; // edge.
+    for(auto jmp : blk->targets()) {
+      assert(nodes[n].addr == jmp->src()->start());
+      nodes[n].edgelist[e].from = nodes[n].addr;
+      nodes[n].edgelist[e].to = jmp->trg()->start();
+      nodes[n].edgelist[e].flags = 0; /* FIXME */
+      e++;
+    }
+    assert(nodes[n].addr != 0x0);
+    n++;
+  }
+  return nodes;
+}
+
 extern "C" struct node*
 cfg(const char* program, size_t* n_nodes)
 {
@@ -192,9 +266,41 @@ cfgLocal(const char* program, const char* function, size_t* n_nodes)
   // acquiesce for now, since there doesn't seem to be a way around it
   // without hacking DynInst.
   std::function<bool(Function*)> f = [&](Function* fqn) {
-    return internalfqn(fqn) || fqn->name() != std::string(function);
+    return internalfqn(fqn) ||
+           fqn->name().find(std::string(function)) == std::string::npos;
   };
   return cfg_filter(program, f, n_nodes);
+}
+
+EXTC struct node*
+cfg_address(const char* program, const uintptr_t address, size_t* nnodes)
+{
+  *nnodes = 0;
+  // SymtabCodeSource modifies the damn argument.
+  char* prog = strdup(program);
+  SymtabCodeSource* sts = new SymtabCodeSource(prog);
+  free(prog);
+
+  const std::vector<CodeRegion*>& regions = sts->regions();
+  std::cout << regions.size() << " regions.\n";
+  CodeRegion* funcregion = NULL;
+  for(auto rgn : regions) {
+    if(rgn->contains(address)) {
+      std::printf("found 0x%08lx in region 0x%08lx--0x%08lx\n", address,
+                  rgn->low(), rgn->high());
+      std::vector<std::string> names;
+      rgn->names(address, names);
+      for(auto s : names) { std::cout << "\t" << s << std::endl; }
+      funcregion = rgn;
+    }
+  }
+
+  std::unique_ptr<CodeObject> co(new CodeObject(sts));
+  co->parse(static_cast<Dyninst::Address>(address), false);
+  Function* f = co->findFuncByEntry(funcregion, address);
+  assert(f != NULL);
+  f->blocks(); // we do this because it finalize()s the fqn (as a side effect)
+  return cfg_from_fqn(f, nnodes);
 }
 
 #ifdef MAIN

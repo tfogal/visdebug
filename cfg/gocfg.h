@@ -26,5 +26,9 @@ struct node {
 EXTC struct node* cfg(const char* program, size_t* n_nodes);
 EXTC struct node* cfgLocal(const char* program, const char* function,
                            size_t* n_nodes);
+// computes the CFG starting from a given address, which should be the
+// entry address of a function.
+EXTC struct node* cfg_address(const char* program, const uintptr_t address,
+                              size_t* n_nodes);
 
 #endif
