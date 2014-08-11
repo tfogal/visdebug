@@ -137,6 +137,17 @@ func Local(program string, function string) map[uintptr]*Node {
   return go_graph(ccfg, nnodes)
 }
 
+// Creates the CFG from a given starting address.  The address is assumed to be
+// the entry point of a function.
+func FromAddress(program string, address uintptr) map[uintptr]*Node {
+  var c_nnodes C.size_t
+  progname := C.CString(program);
+  ccfg := C.cfg_address(progname, C.uintptr_t(address), &c_nnodes)
+  defer C.free(unsafe.Pointer(progname))
+  nnodes := uint(c_nnodes)
+  return go_graph(ccfg, nnodes)
+}
+
 // returns true if the node 'target' is reachable from 'from'.
 func Reachable(target *Node, from *Node) bool {
   seen := make(map[uintptr]bool)
