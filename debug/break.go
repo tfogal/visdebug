@@ -47,7 +47,7 @@ func Unbreak(inferior *ptrace.Tracee, bp Breakpoint) error {
   }
 
   err = inferior.WriteWord(bp.address, (insn & imask) | (bp.insn & 0xFF))
-  if err != nil { return fmt.Errorf("could not restore insn: %v\n", err) }
+  if err != nil { return fmt.Errorf("could not restore insn: %v", err) }
 
   return nil
 }
@@ -56,16 +56,18 @@ func Unbreak(inferior *ptrace.Tracee, bp Breakpoint) error {
 // otherwise we'd essentially be jumping into the middle of an instruction!
 func Stepback(inferior *ptrace.Tracee) error {
   iptr, err := inferior.GetIPtr()
-  if err != nil { return fmt.Errorf("could not get insn ptr: %v\n", err) }
+  if err != nil { return fmt.Errorf("could not get insn ptr: %v", err) }
   err = inferior.SetIPtr(iptr - 1)
-  if err != nil { return fmt.Errorf("could not set insn pointer: %v\n", err) }
+  if err != nil { return fmt.Errorf("could not set insn pointer: %v", err) }
 
   return nil
 }
 
 func WaitUntil(inferior *ptrace.Tracee, address uintptr) error {
   bp, err := Break(inferior, address)
-  if err != nil { return err }
+  if err != nil {
+    return fmt.Errorf("could not set bp: %v", err)
+  }
 
   // wait for the tracee to hit that BP.
   if err = inferior.Continue() ; err != nil {
@@ -83,11 +85,13 @@ func WaitUntil(inferior *ptrace.Tracee, address uintptr) error {
   }
 
   err = Unbreak(inferior, bp)
-  if err != nil { return err }
+  if err != nil {
+    return fmt.Errorf("could not unset bp: %v", err)
+  }
 
   // back up the instruction pointer so the break'd call will now execute.
   if err := Stepback(inferior) ; err != nil {
-    return err
+    return fmt.Errorf("error backing up insn ptr: %v", err)
   }
 
   iptr, err := inferior.GetIPtr()
