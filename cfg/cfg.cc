@@ -214,7 +214,6 @@ cfg_from_fqn(Function* fqn, size_t* n_nodes)
   }
   *n_nodes = nblocks_fqn(fqn);
 
-  std::cout << *n_nodes << " nodes in the cfg for fqn " << fqn->name() << "\n";
   assert(!internalfqn(fqn));
 
   size_t n=0;
@@ -282,15 +281,9 @@ cfg_address(const char* program, const uintptr_t address, size_t* nnodes)
   free(prog);
 
   const std::vector<CodeRegion*>& regions = sts->regions();
-  std::cout << regions.size() << " regions.\n";
   CodeRegion* funcregion = NULL;
   for(auto rgn : regions) {
     if(rgn->contains(address)) {
-      std::printf("found 0x%08lx in region 0x%08lx--0x%08lx\n", address,
-                  rgn->low(), rgn->high());
-      std::vector<std::string> names;
-      rgn->names(address, names);
-      for(auto s : names) { std::cout << "\t" << s << std::endl; }
       funcregion = rgn;
     }
   }
