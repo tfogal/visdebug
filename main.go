@@ -127,6 +127,7 @@ func interactive(argv []string) {
   if err != nil {
     log.Fatalf("could not start program: %v\n", err)
   }
+  <- proc.Events() // eat initial 'process is starting' notification.
   defer proc.Close()
   MainSync(argv[0], proc)
 
