@@ -566,36 +566,31 @@ func bind_identify(node *cfg.Node, inferior *ptrace.Tracee) ([]uint, error) {
   dims := make([]uint, 0)
   for _, hdr := range node.Headers {
     if !hdr.LoopHeader() { panic("non-header in header list!") }
-    if hdr.LoopHeader() {
-      ixn, mraddr, err := find_2regmem([]x86asm.Op{x86asm.MOV, x86asm.CMP},
-                                       x86asm.RIP, hdr.Addr, inferior)
-      if err != nil { return nil, err }
-      memref := ixn.Args[1].(x86asm.Mem)
-      if memref.Base != x86asm.RIP { panic("found wrong insn") }
-      if memref.Disp < 0x10 { panic("displacement makes no sense") }
 
-/*
-      fmt.Printf("memref info:\n\tseg: %v\n\tbase: %v\n\tscale: %v\n",
-                 memref.Segment, memref.Base, memref.Scale)
-      fmt.Printf("\tindex: %v\n\tdisp: 0x%0x\n", memref.Index, memref.Disp)
-*/
-      // now wait until we hit that instruction, whatever it is.
-      if err := debug.WaitUntil(inferior, mraddr) ; err != nil {
-        return nil, err
-      }
+    ixn, mraddr, err := find_2regmem([]x86asm.Op{x86asm.MOV, x86asm.CMP},
+                                     x86asm.RIP, hdr.Addr, inferior)
+    if err != nil { return nil, err }
+    memref := ixn.Args[1].(x86asm.Mem)
+    if memref.Base != x86asm.RIP { panic("found wrong insn") }
+    if memref.Disp < 0x10 { panic("displacement makes no sense") }
 
-      // now that we're here, we can compute the memory reference address and
-      // read the value we are looking for.
-      regs, err := inferior.GetRegs()
-      if err != nil { return nil, err }
-      mr := uintptr(regs.Rip) + uintptr(memref.Disp)
-      // this is bad news if the variable is not 64bits wide...
-      val, err := inferior.ReadWord(mr)
-      if err != nil { return nil, err }
-      val = endianconvert(val) // why do we need this?!
-
-      dims = append(dims, uint(val))
+    // now wait until we hit that instruction, whatever it is.
+    if err := debug.WaitUntil(inferior, mraddr) ; err != nil {
+      return nil, err
     }
+
+    // now that we're here, we can compute the memory reference address and
+    // read the value we are looking for.
+    regs, err := inferior.GetRegs()
+    if err != nil { return nil, err }
+    mr := uintptr(regs.Rip) + uintptr(memref.Disp)
+    // this is bad news if the variable is not 64bits wide...
+    val, err := inferior.ReadWord(mr)
+    if err != nil { return nil, err }
+    val = endianconvert(val) // why do we need this?!
+
+    dims = append(dims, uint(val))
+
     subdims, err := bind_identify(hdr, inferior)
     if err != nil { return nil, err }
     for _, x := range subdims {
