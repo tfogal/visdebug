@@ -389,7 +389,7 @@ func disassemble_cond(inferior *ptrace.Tracee, node *cfg.Node) error {
 
     ixn, err := x86asm.Decode(insn, 64)
     if err != nil { return err }
-    fmt.Printf("0x%08x: \t%v\n", addr, ixn)
+    fmt.Printf("0x%08x: %-25v | %-34s\n", addr, ixn, x86asm.IntelSyntax(ixn))
 
     if conditional_jump(ixn) { // jump instruction.  basic block is done.
       break
@@ -529,7 +529,7 @@ func find_2regmem(opcodes []x86asm.Op, reg x86asm.Reg, startaddr uintptr,
     if err != nil { return bad, 0x0, err }
 
     if conditional_jump(ixn) {
-      return bad, 0x0, errors.New("exited basic block before hitting opcode!")
+      return bad, 0x0, io.EOF // i.e. exited BB before hitting opcode.
     }
 
     if opcode_in(ixn.Op, opcodes) && nargs(ixn.Args) == 2 {
@@ -560,6 +560,62 @@ func endianconvert(u uint64) uint64 {
   return val
 }
 
+func readmem(memref x86asm.Mem, inferior *ptrace.Tracee,
+             signed bool) (int64, error) {
+  regs, err := inferior.GetRegs()
+  if err != nil {
+    return 0, fmt.Errorf("could not read regs: %v", err)
+  }
+  var mr uintptr
+  switch memref.Base {
+  case x86asm.RIP: mr = uintptr(regs.Rip);
+  case x86asm.RBP: mr = uintptr(regs.Rbp);
+  }
+  mr = uintptr(int64(mr) + int64(int32(memref.Disp)))
+/*
+  fmt.Printf("memref: seg: %v, base: %v, scale: %v, index: %v, disp: %d\n",
+             memref.Segment, memref.Base, memref.Scale, memref.Index,
+             int64(int32(memref.Disp)))
+  fmt.Printf("0x%0x + %v == 0x%0x\n", regval, int64(int32(memref.Disp)), mr)
+*/
+
+  val, err := inferior.ReadWord(mr)
+  if err != nil {
+    return 0, fmt.Errorf("reading value @ 0x%0x: %v", mr, err)
+  }
+  if signed {
+    fmt.Printf("pre-conversion, val is: %v\n", val)
+    val = endianconvert(val)
+  }
+  return int64(val), nil
+}
+
+func readreg(regref x86asm.Reg, inferior *ptrace.Tracee,
+             signed bool) (int64, error) {
+  regs, err := inferior.GetRegs()
+  if err != nil { return 0, err }
+
+  var v uint64
+  switch regref {
+  case x86asm.RAX: v = regs.Rax
+  case x86asm.RCX: v = regs.Rcx
+  case x86asm.RDX: v = regs.Rdx
+  case x86asm.RBX: v = regs.Rbx
+  case x86asm.RSP: v = regs.Rsp
+  case x86asm.RBP: v = regs.Rbp
+  case x86asm.RSI: v = regs.Rsi
+  case x86asm.RDI: v = regs.Rdi
+  case x86asm.R8: v = regs.R8
+  case x86asm.R9: v = regs.R9
+  }
+
+  if signed {
+    fmt.Printf("pre-conversion, regval is: %v\n", v)
+    v = endianconvert(v)
+  }
+  return int64(v), nil
+}
+
 // identify the bounds of the loop[s] of where we are now.
 // note this will execute the inferior a little bit.
 func bind_identify(node *cfg.Node, inferior *ptrace.Tracee) ([]uint, error) {
@@ -567,29 +623,40 @@ func bind_identify(node *cfg.Node, inferior *ptrace.Tracee) ([]uint, error) {
   for _, hdr := range node.Headers {
     if !hdr.LoopHeader() { panic("non-header in header list!") }
 
+    // This is a bit painful, since there's lots of different ways the compiler
+    // can encode the loop header.  If you find a program is dying with an
+    // io.EOF here, then the structure of your loop header is unknown and you
+    // need to add a case here.
     ixn, mraddr, err := find_2regmem([]x86asm.Op{x86asm.MOV, x86asm.CMP},
                                      x86asm.RIP, hdr.Addr, inferior)
+    if err == io.EOF { // no such instruction, let's go for a different case.
+      ixn, mraddr, err = find_2regmem([]x86asm.Op{x86asm.CMP}, x86asm.RBP,
+                                      hdr.Addr, inferior)
+    }
     if err != nil { return nil, err }
-    memref := ixn.Args[1].(x86asm.Mem)
-    if memref.Base != x86asm.RIP { panic("found wrong insn") }
-    if memref.Disp < 0x10 { panic("displacement makes no sense") }
 
     // now wait until we hit that instruction, whatever it is.
     if err := debug.WaitUntil(inferior, mraddr) ; err != nil {
       return nil, err
     }
 
-    // now that we're here, we can compute the memory reference address and
-    // read the value we are looking for.
-    regs, err := inferior.GetRegs()
-    if err != nil { return nil, err }
-    mr := uintptr(regs.Rip) + uintptr(memref.Disp)
-    // this is bad news if the variable is not 64bits wide...
-    val, err := inferior.ReadWord(mr)
-    if err != nil { return nil, err }
-    val = endianconvert(val) // why do we need this?!
+    memref := ixn.Args[1].(x86asm.Mem)
+    // some checks to make sure the instructions is as we think...
+    assert(memref.Base == x86asm.RIP || memref.Base == x86asm.RBP)
+    if memref.Base == x86asm.RIP && memref.Disp < 0x100 {
+      panic("displacement too small; makes no sense")
+    }
 
-    dims = append(dims, uint(val))
+    memarg, err := readmem(memref, inferior, false)
+    if err != nil { return nil, err }
+
+    regarg, err := readreg(ixn.Args[0].(x86asm.Reg), inferior, false)
+    if err != nil { return nil, err }
+
+    larger := regarg
+    if memarg > regarg { larger = memarg }
+
+    dims = append(dims, uint(larger))
 
     subdims, err := bind_identify(hdr, inferior)
     if err != nil { return nil, err }

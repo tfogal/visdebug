@@ -18,7 +18,7 @@ func print_walkstack(inferior *ptrace.Tracee) {
   regs, err := inferior.GetRegs()
   if(err != nil) { log.Fatalf(err.Error()) }
 
-  for i:=uint64(0); i < 2; i++ {
+  for i:=uint64(0); i < 35; i++ {
     deref, err := inferior.ReadWord(uintptr(regs.Rsp+(i*8)))
     if err != nil { log.Fatalf(err.Error()) }
     fmt.Printf("[go] rsp-%d (0x%0x): 0x%0x\n", i*8, regs.Rsp+(i*8), deref)
