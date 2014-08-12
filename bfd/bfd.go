@@ -238,12 +238,13 @@ func relocate_symbols(symbols []Symbol, offset uintptr) {
 }
 
 func find_symbol(name string, slist []Symbol) *Symbol {
-  for _, sym := range slist {
-    if sym.name == name {
-      return &sym
-    }
+  idx := sort.Search(len(slist), func (i int) bool {
+    return slist[i].name >= name
+  })
+  if idx == len(slist) {
+    return nil
   }
-  return nil
+  return &slist[idx]
 }
 
 /* When an executable calls a function in a library, that library symbol
@@ -343,11 +344,13 @@ func SymbolsProcess(inferior *ptrace.Tracee) ([]Symbol, error) {
         }
       }
     }
+    sort.Sort(SymList(libsym))
 
     fix_symbols(symbols, libsym)
 
     if lmap_addr == 0x0 { break }
   }
+  sort.Sort(SymList(symbols))
   /*for i:=0; i < len(symbols); i++ {
     fmt.Printf("\t%30s 0x%12x\n", symbols[i].name, symbols[i].addr)
   }*/
