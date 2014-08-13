@@ -9,6 +9,7 @@ import(
   "io"
   "os"
   "log"
+  "runtime/pprof"
   "strings"
   "syscall"
   "github.com/tfogal/ptrace"
@@ -68,6 +69,7 @@ var dotcfg bool
 var showmallocs bool
 var dyninfo bool
 var freespace bool
+var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
 func init() {
   flag.BoolVar(&symlist, "symbols", false, "print out the symbol table")
   flag.BoolVar(&symlist, "s", false, "print out the symbol table")
@@ -92,6 +94,13 @@ func main() {
     return
   }
   argv := flag.Args()
+
+  if *cpuprofile != "" {
+    f, err := os.Create(*cpuprofile)
+    if err != nil { panic(err) }
+    pprof.StartCPUProfile(f)
+    defer pprof.StopCPUProfile()
+  }
 
   if symlist {
     readsymbols(argv[0]);
