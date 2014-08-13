@@ -150,3 +150,11 @@ func TestMallocInterrupt(t *testing.T) {
     t.Fatalf("program did not end?")
   }
 }
+
+var garbage []Symbol
+func BenchmarkSymbols(b *testing.B) {
+  uvfc := "/home/tfogal/dev/iv3d/CmdLineConverter/Build/uvfconvert"
+  sym, err := Symbols(uvfc)
+  if err != nil { b.Fatalf("error loading symbols: %v\n", err) }
+  garbage = sym
+}
