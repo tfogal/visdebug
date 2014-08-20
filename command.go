@@ -3,6 +3,8 @@ package main
 
 import "bufio"
 import "bytes"
+import "debug/dwarf"
+import "debug/elf"
 import "encoding/binary"
 import "errors"
 import "fmt"
@@ -641,7 +643,7 @@ func bind_identify(node *cfg.Node, inferior *ptrace.Tracee) ([]uint, error) {
     }
 
     memref := ixn.Args[1].(x86asm.Mem)
-    // some checks to make sure the instructions is as we think...
+    // some checks to make sure the instruction is as we think...
     assert(memref.Base == x86asm.RIP || memref.Base == x86asm.RBP)
     if memref.Base == x86asm.RIP && memref.Disp < 0x100 {
       panic("displacement too small; makes no sense")
@@ -665,6 +667,117 @@ func bind_identify(node *cfg.Node, inferior *ptrace.Tracee) ([]uint, error) {
     }
   }
   return dims, nil
+}
+
+// finds the given function in the list of those that dwarf gives.
+func dbg_function(symname string, rdr *dwarf.Reader) (*dwarf.Entry, error) {
+  for ent, err := rdr.Next(); ent != nil && err != io.EOF;
+      ent, err = rdr.Next() {
+    if err != nil { return nil, err }
+    if ent.Tag == dwarf.TagSubprogram {
+      for _, fld := range ent.Field {
+        if fld.Attr == dwarf.AttrName && fld.Val.(string) == symname {
+          return ent, nil
+        } else if fld.Attr == dwarf.AttrName {
+          // minor optimization: if it's a subprogram but not the one we're
+          // looking for, skip all its local variables and the like.
+          rdr.SkipChildren()
+        }
+      }
+    }
+  }
+  return nil, io.EOF
+}
+// reads the type from the given dwarf debug symbol
+func dbg_type(flds []dwarf.Field) (dwarf.CommonType, error) {
+  for _, fld := range flds {
+    if fld.Attr == dwarf.AttrType {
+      return fld.Val.(dwarf.CommonType), nil
+    }
+  }
+  return dwarf.CommonType{}, fmt.Errorf("no type found")
+}
+
+// converts a signed "LEB128" from a byte array into a signed integer.
+// algorithm is copied out of the dwarf spec, v4.
+func sleb128(leb []uint8) int64 {
+  //val, _ := binary.Uvarint(leb)
+  result := uint64(0) // go forces unsigned for shifting.  cast later.  sigh.
+  shift := uint(0)
+  const nbits = 64
+  for b := range leb {
+    value := leb[b] & 0x7f
+    result |= uint64(value) << uint64(shift)
+    shift += 7
+  }
+  // second higher-order bit is sign bit (really?)
+  if shift < nbits && (leb[len(leb)-1] & 0x40) != 0 {
+    result |= - (1 << shift) // sign extension.
+  }
+  return int64(result)
+}
+
+
+// 'param' is given as an offset off of the frame pointer.
+func dbg_parameter_type(fqn string, dwf *dwarf.Data,
+                        offset int64) (dwarf.CommonType, error) {
+  bad := dwarf.CommonType{}
+  rdr := dwf.Reader()
+  entry, err := dbg_function(fqn, rdr)
+  if err != nil { return bad, nil }
+  if !entry.Children {
+    return bad, fmt.Errorf("function %v has no children?", entry)
+  }
+
+  for ent, err := rdr.Next(); ent != nil && ent.Tag != 0 && err != io.EOF;
+      ent, err = rdr.Next() {
+    if ent.Tag == dwarf.TagFormalParameter {
+      val, ok := ent.Val(dwarf.AttrLocation).([]uint8)
+      if !ok {
+        return bad, fmt.Errorf("location is not a byte array")
+      }
+      leb := sleb128(val)
+      fmt.Printf("loc: %v[0x%0x] versus %v\n", leb, leb, offset)
+      // why aren't "leb" numbers matching what objdump gives?!
+    }
+  }
+
+  return dwarf.CommonType{}, nil
+}
+
+type cdebuginfo struct {
+  fqn string
+}
+func (c cdebuginfo) Execute(inferior *ptrace.Tracee) error {
+  if err := verify_symbols_loaded(inferior) ; err != nil {
+    return err
+  }
+  sym := symbol(c.fqn, symbols)
+  if sym == nil {
+    return fmt.Errorf("could not find '%s' among the %d known symbols.",
+                      c.fqn, len(symbols))
+  }
+  legolas, err := elf.Open(globals.program)
+  if err != nil { return err }
+
+  gimli, err := legolas.DWARF()
+  if err != nil { return err }
+
+  rdr := gimli.Reader()
+  fqn, err := dbg_function(c.fqn, rdr)
+  if err != nil { return err }
+
+  fmt.Printf("ent: %v\n", fqn)
+  if !fqn.Children {
+    return nil
+  }
+  for ent, err := rdr.Next(); ent != nil && ent.Tag != 0 && err != io.EOF;
+      ent, err = rdr.Next() {
+    fmt.Printf("\t%v\n", ent)
+  }
+  _, err = dbg_parameter_type(c.fqn, gimli, -144)
+  if err != nil { return err }
+  return nil
 }
 
 // identifies the loop bounds for all headers which bound the current location.
@@ -774,6 +887,9 @@ func parse_cmdline(line string) (Command) {
       if len(tokens) == 1 { return cparseerror{"not enough arguments"} }
       return cread{tokens[1]}
     case "boundid": return cboundid{}
+    case "debuginfo":
+      if len(tokens) != 2 { return cparseerror{"not enough arguments"} }
+      return cdebuginfo{tokens[1]}
     default: return cgeneric{tokens}
   }
 }
