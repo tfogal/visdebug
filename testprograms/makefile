@@ -1,7 +1,7 @@
 F95=gfortran
-CXXFLAGS:=-std=c++11 -Wall -Wextra -ggdb3 -fPIC
-CFLAGS:=-std=gnu99 -Wall -Wextra -ggdb3 -fPIC -fno-omit-frame-pointer
-FFLAGS:=-Wall -Wextra -ggdb3 -fPIC
+CXXFLAGS:=-std=c++11 -Wall -Wextra -gdwarf-3 -fPIC
+CFLAGS:=-std=gnu99 -Wall -Wextra -gdwarf-3 -fPIC -fno-omit-frame-pointer
+FFLAGS:=-Wall -Wextra -gdwarf-3 -fPIC
 obj:=3dloop.o vardim.o switch.o bcont.o nested.o loops.o waitfor.o \
   tiny.o use.o smooth3d.o stack.o indirect.o
 all: $(obj) 3dloop dimensional branching contbreak nest forloops pauser s3d \
