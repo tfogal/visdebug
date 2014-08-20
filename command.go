@@ -699,20 +699,25 @@ func dbg_type(flds []dwarf.Field) (dwarf.CommonType, error) {
 }
 
 // converts a signed "LEB128" from a byte array into a signed integer.
-// algorithm is copied out of the dwarf spec, v4.
+// algorithm is modified from the dwarf v4 spec.
 func sleb128(leb []uint8) int64 {
-  //val, _ := binary.Uvarint(leb)
   result := uint64(0) // go forces unsigned for shifting.  cast later.  sigh.
   shift := uint(0)
   const nbits = 64
   for b := range leb {
+    // 0x91 seems to indicate 'this is a multi-byte thing' as opposed to
+    // actually being used.  Not 100% sure this is correct, but we match
+    // objdump on some test code with this continue.
+    if leb[b] == 0x91 { continue }
     value := leb[b] & 0x7f
     result |= uint64(value) << uint64(shift)
     shift += 7
+    // the DWARF algorithm reads the high-order bit as a sentinel, but instead
+    // of an infinite array the Go API just gives us a correctly-sized slice.
   }
-  // second higher-order bit is sign bit (really?)
+  // highest-order bit is the sentinel, so second highest is the sign.
   if shift < nbits && (leb[len(leb)-1] & 0x40) != 0 {
-    result |= - (1 << shift) // sign extension.
+    result = result | uint64(int64(-1) << shift) // sign extension.
   }
   return int64(result)
 }
@@ -737,8 +742,7 @@ func dbg_parameter_type(fqn string, dwf *dwarf.Data,
         return bad, fmt.Errorf("location is not a byte array")
       }
       leb := sleb128(val)
-      fmt.Printf("loc: %v[0x%0x] versus %v\n", leb, leb, offset)
-      // why aren't "leb" numbers matching what objdump gives?!
+      fmt.Printf("loc: %d versus %v\n", leb, offset)
     }
   }
 
