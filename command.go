@@ -827,7 +827,7 @@ func dbg_parameter_type(fqn string, dwf *dwarf.Data,
   bad := dwarf.CommonType{}
   rdr := dwf.Reader()
   entry, err := dbg_function(fqn, rdr)
-  if err != nil { panic("a"); return bad, err }
+  if err != nil { return bad, err }
   if !entry.Children {
     return bad, fmt.Errorf("function %v has no children?", entry)
   }
