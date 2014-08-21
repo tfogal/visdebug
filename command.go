@@ -765,17 +765,10 @@ func dbg_parameter_signed(fqnname string, offset int64) (bool, error) {
   typ, err := dbg_parameter_type(fqnname, gimli, offset)
   if err != nil { return false, err }
   switch(typ.Name) {
-  case "float":   fallthrough
-  case "double":  fallthrough
-  case "int8_t":  fallthrough
-  case "int16_t": fallthrough
-  case "int32_t": fallthrough
-  case "int64_t": return true, nil
-  case "size_t":   fallthrough
-  case "uint8_t":  fallthrough
-  case "uint16_t": fallthrough
-  case "uint32_t": fallthrough
-  case "uint64_t": return false, nil
+  case "float", "double", "int8_t", "int16_t", "int32_t", "int64_t":
+    return true, nil
+  case "size_t", "uint8_t", "uint16_t", "uint32_t", "uint64_t":
+    return false, nil
   default: return false, fmt.Errorf("unknown type: '%v'\n", typ.Common().Name)
   }
 }
