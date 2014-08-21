@@ -586,8 +586,9 @@ func readmem(memref x86asm.Mem, inferior *ptrace.Tracee,
     return 0, fmt.Errorf("reading value @ 0x%0x: %v", mr, err)
   }
   if signed {
-    fmt.Printf("pre-conversion, val is: %v\n", val)
+    fmt.Printf("mem pre-conversion, val is: %v(0x%0x)\n", val, val)
     val = endianconvert(val)
+    fmt.Printf("mem post-conversion, val is: %v(0x%0x)\n", val, val)
   }
   return int64(val), nil
 }
@@ -609,10 +610,11 @@ func readreg(regref x86asm.Reg, inferior *ptrace.Tracee,
   case x86asm.RDI: v = regs.Rdi
   case x86asm.R8: v = regs.R8
   case x86asm.R9: v = regs.R9
+  default: panic("unhandled case")
   }
 
   if signed {
-    fmt.Printf("pre-conversion, regval is: %v\n", v)
+    fmt.Printf("pre-conversion, regval is: %v(0x%0x)\n", v, v)
     v = endianconvert(v)
   }
   return int64(v), nil
@@ -620,10 +622,16 @@ func readreg(regref x86asm.Reg, inferior *ptrace.Tracee,
 
 // identify the bounds of the loop[s] of where we are now.
 // note this will execute the inferior a little bit.
-func bind_identify(node *cfg.Node, inferior *ptrace.Tracee) ([]uint, error) {
+func bind_identify(fqn string, node *cfg.Node,
+                   inferior *ptrace.Tracee) ([]uint, error) {
   dims := make([]uint, 0)
   for _, hdr := range node.Headers {
     if !hdr.LoopHeader() { panic("non-header in header list!") }
+    // This whole approach needs overhauled.
+    // We need to find the CMP instruction and run the inferior until then.
+    // We also need to do some data flow analysis to identify the *source* of
+    // both datums in the instruction.  We need to know the source so we can
+    // look it up in the debug info and figure out its signedness.
 
     // This is a bit painful, since there's lots of different ways the compiler
     // can encode the loop header.  If you find a program is dying with an
@@ -632,12 +640,14 @@ func bind_identify(node *cfg.Node, inferior *ptrace.Tracee) ([]uint, error) {
     ixn, mraddr, err := find_2regmem([]x86asm.Op{x86asm.MOV, x86asm.CMP},
                                      x86asm.RIP, hdr.Addr, inferior)
     if err == io.EOF { // no such instruction, let's go for a different case.
+      fmt.Printf("searching for frame-relative memref in CMP instruction...\n")
       ixn, mraddr, err = find_2regmem([]x86asm.Op{x86asm.CMP}, x86asm.RBP,
                                       hdr.Addr, inferior)
     }
     if err != nil { return nil, err }
 
     // now wait until we hit that instruction, whatever it is.
+    fmt.Printf("waiting until 0x%0x\n", mraddr)
     if err := debug.WaitUntil(inferior, mraddr) ; err != nil {
       return nil, err
     }
@@ -649,18 +659,40 @@ func bind_identify(node *cfg.Node, inferior *ptrace.Tracee) ([]uint, error) {
       panic("displacement too small; makes no sense")
     }
 
-    memarg, err := readmem(memref, inferior, false)
+    // this needs to be better.  we might be looking at a CMP instruction of
+    // two registers, but the registers were loaded based on the frame pointer.
+    // Thus we need to look at the data flow and see not just what the thing
+    // being referenced is, but rather the source of its value.
+    signed := false
+    if memref.Base == x86asm.RBP {
+      signed, err = dbg_parameter_signed(fqn, memref.Disp)
+      if signed {
+        fmt.Printf("memory value is signed, signing its read.")
+      }
+      if err != nil { return nil, err }
+    }
+    // before we read, make sure we're at the cmp instruction.
+    if ixn.Op != x86asm.CMP {
+      fmt.Printf("not quite at CMP.  stepping...\n")
+      if err := inferior.SingleStep() ; err != nil {
+        return nil, err
+      }
+    }
+
+    memarg, err := readmem(memref, inferior, signed)
     if err != nil { return nil, err }
 
+    // fixme: figure out if the reg argument is signed (need DFlow analysis)
     regarg, err := readreg(ixn.Args[0].(x86asm.Reg), inferior, false)
     if err != nil { return nil, err }
+    fmt.Printf("reg, mem: %v, %v\n", regarg, memarg)
 
     larger := regarg
     if memarg > regarg { larger = memarg }
 
     dims = append(dims, uint(larger))
 
-    subdims, err := bind_identify(hdr, inferior)
+    subdims, err := bind_identify(fqn, hdr, inferior)
     if err != nil { return nil, err }
     for _, x := range subdims {
       dims = append(dims, x)
@@ -722,14 +754,80 @@ func sleb128(leb []uint8) int64 {
   return int64(result)
 }
 
+func dbg_parameter_signed(fqnname string, offset int64) (bool, error) {
+  legolas, err := elf.Open(globals.program)
+  if err != nil { return false, err }
+  defer legolas.Close()
+
+  gimli, err := legolas.DWARF()
+  if err != nil { return false, err }
+
+  typ, err := dbg_parameter_type(fqnname, gimli, offset)
+  if err != nil { return false, err }
+  switch(typ.Name) {
+  case "float":   fallthrough
+  case "double":  fallthrough
+  case "int8_t":  fallthrough
+  case "int16_t": fallthrough
+  case "int32_t": fallthrough
+  case "int64_t": return true, nil
+  case "size_t":   fallthrough
+  case "uint8_t":  fallthrough
+  case "uint16_t": fallthrough
+  case "uint32_t": fallthrough
+  case "uint64_t": return false, nil
+  default: return false, fmt.Errorf("unknown type: '%v'\n", typ.Common().Name)
+  }
+}
+
+func print_type(entry *dwarf.Entry, rdr *dwarf.Reader) {
+  atype, ok := entry.Val(dwarf.AttrType).(dwarf.Offset)
+  if !ok { return }
+  rdr.Seek(atype)
+  ent, err := rdr.Next()
+  if err != nil { panic(err) }
+
+  fmt.Printf("type: %v\n", ent)
+  for _, f := range ent.Field {
+    fmt.Printf("\t %v\n", f)
+  }
+  print_type(ent, rdr)
+}
+
+// given a type, follows the type chain until it gets to the base type and then
+// returns its name.
+func dbg_base_type(entry *dwarf.Entry) (*dwarf.Entry, error) {
+  bad := &dwarf.Entry{}
+  legolas, err := elf.Open(globals.program)
+  if err != nil { return bad, err }
+  defer legolas.Close()
+  gimli, err := legolas.DWARF()
+  if err != nil { return bad, err }
+
+  atype, ok := entry.Val(dwarf.AttrType).(dwarf.Offset)
+  if !ok { return bad, fmt.Errorf("bad entry point") }
+  rdr := gimli.Reader()
+  rdr.Seek(atype)
+  ent, err := rdr.Next()
+  if err != nil { return bad, err }
+
+  if ent.Tag == dwarf.TagBaseType {
+    _, ok := ent.Val(dwarf.AttrName).(string)
+    if !ok { return bad, fmt.Errorf("name is not a string?") }
+    return ent, nil
+  }
+  return dbg_base_type(ent) // recurse.
+}
+
 
 // 'param' is given as an offset off of the frame pointer.
 func dbg_parameter_type(fqn string, dwf *dwarf.Data,
                         offset int64) (dwarf.CommonType, error) {
+  // seems to be broken somehow, always returning a blank type....
   bad := dwarf.CommonType{}
   rdr := dwf.Reader()
   entry, err := dbg_function(fqn, rdr)
-  if err != nil { return bad, nil }
+  if err != nil { panic("a"); return bad, err }
   if !entry.Children {
     return bad, fmt.Errorf("function %v has no children?", entry)
   }
@@ -742,17 +840,37 @@ func dbg_parameter_type(fqn string, dwf *dwarf.Data,
         return bad, fmt.Errorf("location is not a byte array")
       }
       leb := sleb128(val)
-      fmt.Printf("loc: %d versus %v\n", leb, offset)
+      if leb == offset {
+        ty, err := dbg_base_type(ent)
+        if err != nil { return bad, err }
+        if ty.Tag != dwarf.TagBaseType { panic("dbg_base_type is buggy") }
+        typ, err := dwf.Type(ty.Offset)
+        if err != nil { return bad, err }
+        return *typ.Common(), nil
+      }
     }
   }
 
-  return dwarf.CommonType{}, nil
+  return bad, fmt.Errorf("offset never found")
 }
 
 type cdebuginfo struct {
   fqn string
+  offset string
 }
 func (c cdebuginfo) Execute(inferior *ptrace.Tracee) error {
+  // parse 'c.offset' into a usable number instead of a string.
+  var offset int64
+  if c.offset == "" { // the parameter is optional.
+    offset = 0
+  } else {
+    var err error
+    offset, err = strconv.ParseInt(c.offset, 0, 64)
+    if err != nil {
+      return fmt.Errorf("cannot convert %v to an offset: %v\n", c.offset, err)
+    }
+  }
+
   if err := verify_symbols_loaded(inferior) ; err != nil {
     return err
   }
@@ -763,6 +881,7 @@ func (c cdebuginfo) Execute(inferior *ptrace.Tracee) error {
   }
   legolas, err := elf.Open(globals.program)
   if err != nil { return err }
+  defer legolas.Close()
 
   gimli, err := legolas.DWARF()
   if err != nil { return err }
@@ -770,17 +889,15 @@ func (c cdebuginfo) Execute(inferior *ptrace.Tracee) error {
   rdr := gimli.Reader()
   fqn, err := dbg_function(c.fqn, rdr)
   if err != nil { return err }
-
   fmt.Printf("ent: %v\n", fqn)
-  if !fqn.Children {
+
+  if offset == 0 {
     return nil
   }
-  for ent, err := rdr.Next(); ent != nil && ent.Tag != 0 && err != io.EOF;
-      ent, err = rdr.Next() {
-    fmt.Printf("\t%v\n", ent)
-  }
-  _, err = dbg_parameter_type(c.fqn, gimli, -144)
+  typ, err := dbg_parameter_type(c.fqn, gimli, offset)
   if err != nil { return err }
+  fmt.Printf("type: %v\n", typ)
+
   return nil
 }
 
@@ -821,7 +938,7 @@ func (cboundid) Execute(inferior *ptrace.Tracee) error {
   bb, err := basic_block(graph, whereis(inferior))
   if err != nil { return err }
 
-  dims, err := bind_identify(bb, inferior)
+  dims, err := bind_identify(symb.Name(), bb, inferior)
   if err != nil { return err }
   if len(dims) == 0 {
     if len(bb.Headers) != 0 { panic("broken Headers definition ?") }
@@ -892,8 +1009,9 @@ func parse_cmdline(line string) (Command) {
       return cread{tokens[1]}
     case "boundid": return cboundid{}
     case "debuginfo":
-      if len(tokens) != 2 { return cparseerror{"not enough arguments"} }
-      return cdebuginfo{tokens[1]}
+      if len(tokens) == 3 { return cdebuginfo{tokens[1], tokens[2]} }
+      if len(tokens) == 2 { return cdebuginfo{tokens[1], ""} }
+      return cparseerror{"invalid # of arguments."}
     default: return cgeneric{tokens}
   }
 }
