@@ -172,12 +172,10 @@ func lmap_head(inferior *ptrace.Tracee, addr uintptr) uintptr {
     if err != nil {
       fmt.Fprintf(os.Stderr, "could not read word@0x%0x: %v\n", dynaddr, err)
       panic("could not read dynamic tag from inferior")
-      return 0x0
     }
     switch(elf.DynTag(tag)) {
       case elf.DT_NULL: /* not found! */
         panic("DT_DEBUG section not found, cannot find link_map")
-        return 0x0
       case elf.DT_DEBUG: {
         fmt.Fprintf(strm, "found the debug tag at 0x%0x\n", dynaddr)
         rdbg, err := inferior.ReadWord(dynaddr+uintptr(C.Elf64_Sxwordsz()))

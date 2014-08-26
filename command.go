@@ -547,7 +547,6 @@ func find_2regmem(opcodes []x86asm.Op, reg x86asm.Reg, startaddr uintptr,
       addr += uintptr(ixn.Args[0].(x86asm.Rel))
     }
   }
-  return bad, 0x0, errors.New("inconceivable!") // not reachable.
 }
 
 // this is garbage.  we shouldn't need to hardcode this in.
