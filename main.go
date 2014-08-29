@@ -390,12 +390,13 @@ func replace(slice []uint8, word int32) {
 
 // Identifies a part of our address space that is unused.  Then fills it with a
 // function that will posix_memalign-allocate some memory.
+// Returns the starting/ending addresses of the created code.
 func fspace_fill(inferior *ptrace.Tracee, getpagesize uintptr,
-                 memalign uintptr) (uintptr, error) {
-  //viewmaps(inferior.PID())
+                 memalign uintptr) ([2]uintptr, error) {
+  viewmaps(inferior.PID())
 
   addr, err := free_space_address(inferior.PID())
-  if err != nil { return 0x0, err }
+  if err != nil { return [2]uintptr{0x0,0x0}, err }
 
   fmt.Printf("first freespace addr is at: 0x%0x\n", addr)
 
@@ -466,10 +467,13 @@ func fspace_fill(inferior *ptrace.Tracee, getpagesize uintptr,
 
   // .. maybe we should read/save whatever code is already there, first?
   if err = inferior.Write(addr, memalign_code) ; err != nil {
-    return 0x0, err
+    return [2]uintptr{0x0,0x0}, err
   }
 
-  return addr, nil
+  // NEED TO SWITCH MEMORY REGION TO BE EXECUTABLE!!
+
+  end_addr := addr + uintptr(uint(len(memalign_code)))
+  return [2]uintptr{addr, end_addr}, nil
   // next: save registers, overwrite current instruction pointer so we
   // 'call $addr', break somewhere inside this function so that we can
   // restore the old instruction pointer's value, finish our function,

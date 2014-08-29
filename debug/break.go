@@ -81,7 +81,12 @@ func WaitUntil(inferior *ptrace.Tracee, address uintptr) error {
     return io.EOF
   case status.CoreDump(): return errors.New("abnormal termination, core dumped")
   case status.StopSignal() != syscall.SIGTRAP:
-    return fmt.Errorf("unexpected signal %d", status.StopSignal())
+    addr, err := inferior.GetIPtr()
+    if err != nil {
+      return fmt.Errorf("unexpected signal %d and could not get addr!",
+                        status.StopSignal())
+    }
+    return fmt.Errorf("unexpected signal %d @ 0x%0x", status.StopSignal(), addr)
   }
 
   err = Unbreak(inferior, bp)
