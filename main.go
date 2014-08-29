@@ -13,6 +13,7 @@ import(
   "strings"
   "syscall"
   "github.com/tfogal/ptrace"
+  "code.google.com/p/rsc.x86/x86asm"
   "./bfd"
   "./cfg"
   "./debug"
@@ -370,85 +371,105 @@ func show_free_space(argv []string) {
   assert(symbol("getpagesize", symbols) != nil)
   assert(symbol("posix_memalign", symbols) != nil)
 
-  fspace_addr(inferior, symbol("getpagesize", symbols).Address(),
+  fspace_fill(inferior, symbol("getpagesize", symbols).Address(),
               symbol("posix_memalign", symbols).Address())
 }
 
 // slice[i] = word[i] forall i in word
-func replace(slice []uint8, word uint32) {
-  buf := bytes.NewBuffer(slice)
+func replace(slice []uint8, word int32) {
+  // it's ill-defined what we want to replace if they give us >4 bytes.
+  if len(slice) != 4 {
+    panic("this assumes we are replacing a 4 byte quantity!!")
+  }
+  buf := new(bytes.Buffer)
   binary.Write(buf, binary.LittleEndian, word)
   bts := buf.Bytes()
-  if len(slice) != 4 { panic("uint32 should give us a 4 byte quantity...") }
-  slice[0] = bts[0]
-  slice[1] = bts[1]
-  slice[2] = bts[2]
-  slice[3] = bts[3]
+  slice[0] = bts[0]; slice[1] = bts[1]
+  slice[2] = bts[2]; slice[3] = bts[3]
 }
 
-// Identifies a part of our address space that is "free".  Then fills it with a
-// function that will posix_memalign a chunk of memory given by the first
-// argument.
-func fspace_addr(inferior *ptrace.Tracee, getpagesize uintptr,
-                 memalign uintptr) {
-  viewmaps(inferior.PID())
+// Identifies a part of our address space that is unused.  Then fills it with a
+// function that will posix_memalign-allocate some memory.
+func fspace_fill(inferior *ptrace.Tracee, getpagesize uintptr,
+                 memalign uintptr) (uintptr, error) {
+  //viewmaps(inferior.PID())
 
   addr, err := free_space_address(inferior.PID())
-  if err != nil { log.Fatalf(err.Error()) }
+  if err != nil { return 0x0, err }
 
   fmt.Printf("first freespace addr is at: 0x%0x\n", addr)
 
-  // 'call' takes a relative address---relative to the current instruction
-  // pointer, +5 (since the 'call' instruction is itself 5 bytes long).
-  // so we need to find out what the iptr of the call instruction will be, +5,
-  // and then calculate the difference between that and the function we want to
-  // call.
-  // 20: I just counted the number of instructions in the array below. off by 1?
-  gps_reladdr := uint32(getpagesize - addr+20+5)
-  // 42: instruction offset, again... off by one??
-  malign_reladdr := uint32(memalign - addr+42+5)
-
-  // at the time we get called, we're at a breakpoint for malloc.  so our
-  // replacement function has malloc's argument (n bytes) in RDI, and we need
-  // to fill RAX with whatever posix_memalign gives.
-  memalign_code := []uint8{
-    0x55,                         // push %rbp
-    0x48, 0x89, 0xe5,             // mov %rsp, %rbp
-    0x48, 0x83, 0xec, 0x20,       // sub $0x20, %rsp  ; reserve 32bytes of stack
-    0x48, 0x89, 0x78, 0xe8,       // mov %rdi, -0x18(%rbp)
-    0x48, 0xc7, 0x45, 0x48, 0x00, 0x00, 0x00, 0x00, // movq $0, -0x8(%rbp)
-    0xe8, 0xFF, 0xFF, 0xFF, 0xFF, // callq getpagesize@plt ; will fill in later
-    0x48, 0x63, 0xc8,             // movlsq %eax, %rcx ; sign-extend GPS retval
-    0x48, 0x8b, 0x55, 0xe8,       // mov -0x18(%rbp), %rdx
-    0x48, 0x8d, 0x45, 0xf8,       // lea -0x8(%rbp), %rax  ; 1st stackvar to RAX
-    0x48, 0x89, 0xce,             // mov %rcx, %rsi  ; GPS retval is 2nd arg
-    0x48, 0x89, 0xc7,             // mov %rax, %rdi  ; 1st arg is 1st stackvar
-    0xe8, 0x00, 0x00, 0x00, 0x00, // callq posix_memalign ; will fill in later
-    0x48, 0x8b, 0x45, 0xf8, // mov -0x8(%rbp), %rax
-    0xc9,                         // leaveq
-    0xc3,                         // retq
+  // we're essentially defining the function:
+  //   void* fqn(size_t n) {
+  //     void* mem = NULL;
+  //     posix_memalign(&mem, 4096, n);
+  //     return mem;
+  //   }
+  // but in pure object code.  Note that the above relies on posix_memalign not
+  // changing 'mem' when it fails, which isn't necessarily guaranteed... 
+  memalign_code := []byte{
+    0x48, 0x83, 0xec, 0x18,                   // sub    $0x18,%rsp
+    0x48, 0x89, 0xfa,                         // mov    %rdi,%rdx
+    0xbe, 0x00, 0x10, 0x00, 0x00,             // mov    $0x1000,%esi
+    0x48, 0x89, 0xe7,                         // mov    %rsp,%rdi
+    0x48, 0xc7, 0x04, 0x24,                   // movq   $0x0,(%rsp)
+      0x00, 0x00, 0x00, 0x00,                 // (this is the 0x0)
+    //0xe8, 0xe4, 0xfe, 0xff, 0xff,           // callq  posix_memalign
+    // The FF's are an reloffset; we cannot know it statically.  See below.
+    0xe8, 0xFF, 0xFF, 0xFF, 0xFF,             // callq  posix_memalign
+    0x48, 0x8b, 0x04, 0x24,                   // mov    (%rsp),%rax
+    0x48, 0x83, 0xc4, 0x18,                   // add    $0x18,%rsp
+    0xc3,                                     // retq
+    0x66, 0x2e, 0x0f, 0x1f, 0x84, 0x00, 0x00, // nopw   %cs:0x0(%rax,%rax,1)
+    0x00, 0x00, 0x00,
+    0x90,                                     // nop
   }
-  replace(memalign_code[21-4:25-4], gps_reladdr)
-  replace(memalign_code[43-4:47-4], malign_reladdr)
 
-  // Print out this info for now, so we can verify that the arguments to the
-  // 'call' instructions get filled in properly.
-  fmt.Printf("gps reladdr: 0x%x\n", gps_reladdr)
-  fmt.Printf("malign reladdr: 0x%x\n", malign_reladdr)
+  // Now we have to fix up the 'call' address that is filled with "0xFF" (note
+  // caps) above.  We need to fill that 32bit space with the *relative* address
+  // of posix_memalign.  It's relative to the instruction pointer, but not the
+  // instruction pointer /now/, rather the address of the END of the call
+  // instruction (i.e. address of the instruction after the call).
+  // Since we're going to fill 'addr' with this function, that can serve as our
+  // base address.  Then it's just an issue of counting bytes.
+  malign_addr := addr + 23
+  malign_end_addr := malign_addr + 5
+  malign_reladdr := int64(memalign) - int64(malign_end_addr)
+  fmt.Printf("memalign is at: %v (0x%0x)\n", memalign, memalign)
+  fmt.Printf("reladdr: %v (0x%0x)\n", malign_reladdr, malign_reladdr)
+  if malign_reladdr != int64(int32(malign_reladdr)) { // does it fit in 32bit?
+    panic("can't encode jump to posix_memalign as a near call!")
+  }
+
+  // 23 bytes in is the 'e8' of our call.  We want to replace the argument,
+  // which is 1 past that, and is 4 bytes long.
+  // I have no idea why the -4 is needed, but looking at the ouptut, it is.
+  replace(memalign_code[23+1:23+1+4], int32(malign_reladdr))
+
+  // This is just for debugging, so we can see if what we put in there is valid.
   fmt.Printf("buf:\n")
-  i := 0
-  for _,v := range memalign_code {
-    fmt.Printf("0x%02x ", v)
-    i++
-    if (i % 15) == 0 { fmt.Printf("\n") }
+  for i,v := range memalign_code {
+    if i >= 23+1 && i < 23+1+4 { // the code (address) we are replacing.
+      fmt.Printf("0x%02X ", v)
+    } else {
+      fmt.Printf("0x%02x ", v)
+    }
+    if i != 0 && (i % 15) == 0 { fmt.Printf("\n") }
   }
-  fmt.Printf("\n")
+  fmt.Printf("\ndecoded:\n")
+  for offset := 0 ; offset < len(memalign_code) ; {
+    ixn, err := x86asm.Decode(memalign_code[offset:], 64)
+    if err != nil { panic(err) }
+    fmt.Printf("\t%v\n", ixn)
+    offset += ixn.Len
+  }
 
-  // .. we should probably read/save whatever code is already there, first.
+  // .. maybe we should read/save whatever code is already there, first?
   if err = inferior.Write(addr, memalign_code) ; err != nil {
-    log.Fatalf("could not write memalign code into inferior: %v\n", err)
+    return 0x0, err
   }
 
+  return addr, nil
   // next: save registers, overwrite current instruction pointer so we
   // 'call $addr', break somewhere inside this function so that we can
   // restore the old instruction pointer's value, finish our function,
