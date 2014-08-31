@@ -89,14 +89,14 @@ func WaitUntil(inferior *ptrace.Tracee, address uintptr) error {
     return fmt.Errorf("unexpected signal %d @ 0x%0x", status.StopSignal(), addr)
   }
 
-  err = Unbreak(inferior, bp)
-  if err != nil {
-    return fmt.Errorf("could not unset bp: %v", err)
-  }
-
   // back up the instruction pointer so the break'd call will now execute.
   if err := Stepback(inferior) ; err != nil {
     return fmt.Errorf("error backing up insn ptr: %v", err)
+  }
+
+  err = Unbreak(inferior, bp)
+  if err != nil {
+    return fmt.Errorf("could not unset bp: %v", err)
   }
 
   iptr, err := inferior.GetIPtr()
