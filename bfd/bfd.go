@@ -287,6 +287,7 @@ var needed = []needed_sym{
   {"libc.so", "free"},
   {"libc.so", "getpagesize"},
   {"libc.so", "posix_memalign"},
+  {"libc.so", "mmap"},
 }
 
 /* reads symbols from the process, properly relocating them to get their actual
