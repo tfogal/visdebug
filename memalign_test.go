@@ -6,7 +6,7 @@ import "./debug"
 import "github.com/tfogal/ptrace"
 import "code.google.com/p/rsc.x86/x86asm"
 
-func TestFill(t *testing.T) {
+func testFill(t *testing.T) {
   argv := []string{"testprograms/dimensional"}
   inferior, err := ptrace.Exec(argv[0], argv)
   if err != nil {
@@ -29,10 +29,27 @@ func TestFill(t *testing.T) {
     t.Fatalf("no posix_memalign symbol")
   }
 
-  addrs, err := fspace_fill(inferior, 0x0, malign.Address())
+  iptr, err := inferior.GetIPtr()
   if err != nil {
-    t.Fatalf("could not create aligned function")
+    t.Fatalf("could not read instruction pointer: %v", err)
   }
+  // save the code that's currently there.
+  insns := make([]byte, 128)
+  if err := inferior.Read(iptr, insns) ; err != nil {
+    t.Fatalf("could not save instructions: %v", err)
+  }
+
+  addrs, err := fspace_fill(inferior, 0x7f9c71000000, malign.Address())
+  if err != nil {
+    t.Fatalf("could not create aligned function: %v", err)
+  }
+  if addrs[1] <= addrs[0] {
+    t.Fatalf("backwards function?")
+  }
+  if uint(addrs[1] - addrs[0]) > uint(len(insns)) {
+    t.Fatalf("did not save enough bytes for a proper restore!")
+  }
+
   // It's unreasonable that we'd identify low memory as our target address.
   start := symbol("_start", symbols)
   if start == nil { t.Fatalf("no start?!") }
@@ -45,7 +62,7 @@ func TestFill(t *testing.T) {
   }
 }
 
-func TestExecFill(t *testing.T) {
+func testExecFill(t *testing.T) {
   argv := []string{"testprograms/dimensional", "3"}
   inferior, err := ptrace.Exec(argv[0], argv)
   if err != nil {
@@ -109,4 +126,55 @@ func TestExecFill(t *testing.T) {
   if err := debug.WaitUntil(inferior, addr[1]) ; err != nil {
     t.Fatalf("never exited our custom code.. %v", err)
   }
+}
+
+func TestAllocInferior(t *testing.T) {
+  argv := []string{"testprograms/dimensional", "3"}
+  inferior, err := ptrace.Exec(argv[0], argv)
+  if err != nil {
+    t.Fatalf("can't exec child: %v", err)
+  }
+  <- inferior.Events() // eat 'process is starting' event.
+  defer inferior.Close()
+
+  if err := MainSync(argv[0], inferior) ; err != nil {
+    t.Fatalf("could not sync main: %v", err)
+  }
+
+  symbols, err := bfd.SymbolsProcess(inferior)
+  if err != nil {
+    t.Fatalf("could not read smbols: %v\n", err)
+  }
+
+  malign := symbol("posix_memalign", symbols)
+  if malign == nil {
+    t.Fatalf("no posix_memalign symbol")
+  }
+
+  malloc := symbol("malloc", symbols)
+  if malloc == nil || malloc.Address() == 0x0 {
+    t.Fatalf("malloc symbol not available, symbtab broken?")
+  }
+
+  mmap := symbol("mmap", symbols)
+  if mmap == nil {
+    t.Fatalf("no mmap!")
+  }
+  main := symbol("main", symbols)
+  if main == nil {
+    t.Fatalf("no main!")
+  }
+
+  addr, err := alloc_inferior(inferior, mmap.Address(), main.Address())
+  if err != nil {
+    t.Fatalf("creating memory for our memalign: %v", err)
+  }
+  if addr < main.Address() {
+    t.Fatalf("address 0x%0x makes no sense", addr)
+  }
+
+  if err := inferior.Continue() ; err != nil {
+    t.Fatalf("could not finish program: %v", err)
+  }
+  <- inferior.Events() // let it finish.
 }

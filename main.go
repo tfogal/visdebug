@@ -391,15 +391,8 @@ func replace(slice []uint8, word int32) {
 // Identifies a part of our address space that is unused.  Then fills it with a
 // function that will posix_memalign-allocate some memory.
 // Returns the starting/ending addresses of the created code.
-func fspace_fill(inferior *ptrace.Tracee, getpagesize uintptr,
+func fspace_fill(inferior *ptrace.Tracee, addr uintptr,
                  memalign uintptr) ([2]uintptr, error) {
-  viewmaps(inferior.PID())
-
-  addr, err := free_space_address(inferior.PID())
-  if err != nil { return [2]uintptr{0x0,0x0}, err }
-
-  fmt.Printf("first freespace addr is at: 0x%0x\n", addr)
-
   // we're essentially defining the function:
   //   void* fqn(size_t n) {
   //     void* mem = NULL;
@@ -436,6 +429,7 @@ func fspace_fill(inferior *ptrace.Tracee, getpagesize uintptr,
   malign_addr := addr + 23
   malign_end_addr := malign_addr + 5
   malign_reladdr := int64(memalign) - int64(malign_end_addr)
+  fmt.Printf("addr: %v (0x%0x)\n", addr, addr)
   fmt.Printf("memalign is at: %v (0x%0x)\n", memalign, memalign)
   fmt.Printf("reladdr: %v (0x%0x)\n", malign_reladdr, malign_reladdr)
   if malign_reladdr != int64(int32(malign_reladdr)) { // does it fit in 32bit?
@@ -458,19 +452,12 @@ func fspace_fill(inferior *ptrace.Tracee, getpagesize uintptr,
     if i != 0 && (i % 15) == 0 { fmt.Printf("\n") }
   }
   fmt.Printf("\ndecoded:\n")
-  for offset := 0 ; offset < len(memalign_code) ; {
-    ixn, err := x86asm.Decode(memalign_code[offset:], 64)
-    if err != nil { panic(err) }
-    fmt.Printf("\t%v\n", ixn)
-    offset += ixn.Len
-  }
+  decode_stdout(memalign_code)
 
   // .. maybe we should read/save whatever code is already there, first?
-  if err = inferior.Write(addr, memalign_code) ; err != nil {
+  if err := inferior.Write(addr, memalign_code) ; err != nil {
     return [2]uintptr{0x0,0x0}, err
   }
-
-  // NEED TO SWITCH MEMORY REGION TO BE EXECUTABLE!!
 
   end_addr := addr + uintptr(uint(len(memalign_code)))
   return [2]uintptr{addr, end_addr}, nil
@@ -479,4 +466,104 @@ func fspace_fill(inferior *ptrace.Tracee, getpagesize uintptr,
   // restore the old instruction pointer's value, finish our function,
   // restore registers except make sure we place our aligned alloc
   // retval into the right place, rock.
+}
+
+func decode_stdout(memory []byte) {
+  for offset := 0 ; offset < len(memory) ; {
+    ixn, err := x86asm.Decode(memory[offset:], 64)
+    if err != nil { panic(err) }
+    fmt.Printf("\t%v\n", ixn)
+    offset += ixn.Len
+  }
+}
+
+// This creates an executable chunk of memory in the inferior's address space
+// that we can then use for our nefarious purposes.  It overwrites the
+// registers and instruction pointer so that, instead of executing the next
+// instruction, the inferior instead calls
+//   mmap(NULL, 4096, PROT_READ | PROT_EXEC, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
+// Then it pulls out the return address from mmap---the address of the memory
+// we want---and restores all the original registers and instruction pointer.
+// Returns the retval of mmap.
+// Must be called when the inferior is stopped *AT*'main'*!
+// This is cool; and by cool, I mean totally sweet.
+func alloc_inferior(inferior *ptrace.Tracee, mmap uintptr,
+                    main uintptr) (uintptr, error) {
+  regs, err := inferior.GetRegs()
+  if err != nil {
+    return 0x0, err
+  }
+  orig_regs := regs // copy registers.
+
+  if uintptr(regs.Rip) != main {
+    fmt.Printf("main is: 0x%0x and we are at 0x%0x\n", main, uintptr(regs.Rip))
+    return 0x0, fmt.Errorf("not at main")
+  }
+
+  regs.Rdi = 0x0 // addr
+  regs.Rsi = 0x1000 // length
+  regs.Rdx = 0x5 // prot
+  regs.Rcx = 0x22 // flags
+  regs.R8 = 0xffffffffffffffff // fd
+  regs.R9 = 0
+  if int64(regs.R8) != -1 {
+    return 0x0, fmt.Errorf("our 'fd' argument to mmap is incorrect..")
+  }
+
+  regs.Rax = 0xdeadbeef // for testing/making sure our retval is valid.
+  regs.Rip = uint64(mmap)
+
+  // The 'ret' insruction reads *%rsp and jumps back to that.  So fill *%rsp
+  // with the address of 'main'.  But save what's there at the moment, so we
+  // can restore it later.
+  // That said, we're just starting main, so whatever's in %rsp is probably
+  // garbage.  But i'm a stickler for 'leave no trace', soooo....
+  save_stack, err := inferior.ReadWord(uintptr(regs.Rsp))
+  if err != nil {
+    return 0x0, err
+  }
+  if err := inferior.WriteWord(uintptr(regs.Rsp), uint64(main)) ; err != nil {
+    return 0x0, fmt.Errorf("could not replace *%rsp with main's addr: %v", err)
+  }
+
+  // Okay, now setup our registers for the mmap arguments and jump there.
+  if err := inferior.SetRegs(regs) ; err != nil {
+    return 0x0, err
+  }
+  // We hacked our stack to return to main; wait until that happens.
+  if err := debug.WaitUntil(inferior, main) ; err != nil {
+    return 0x0, fmt.Errorf("did not return to main: %v", err)
+  }
+
+  // We're back from main.  What did 'mmap' give us?
+  var stk x86_64
+  retval := uintptr(stk.RetVal(inferior))
+  if retval == 0xdeadbeef || int64(retval) == -1 {
+    panic("mmap gave us back -1, we must have broken its args or something")
+  }
+
+  // I'm so hilarious:
+  fmt.Println("Now back to your regularly scheduled programming.")
+  if err := inferior.SetRegs(orig_regs) ; err != nil {
+    return 0x0, err
+  }
+  if err := inferior.WriteWord(uintptr(regs.Rsp), save_stack) ; err != nil {
+    return 0x0, fmt.Errorf("could not update *%rsp with correct addr: %v", err)
+  }
+  return retval, nil
+}
+
+func insns_stdout(inferior *ptrace.Tracee) error {
+  regs, err := inferior.GetRegs()
+  if err != nil {
+    return err
+  }
+
+  mem := make([]byte, 24)
+  if err := inferior.Read(uintptr(regs.Rip), mem) ; err != nil {
+    return err
+  }
+  fmt.Printf("instructions from 0x%0x\n", regs.Rip)
+  decode_stdout(mem)
+  return nil
 }
