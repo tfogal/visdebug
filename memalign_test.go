@@ -8,16 +8,11 @@ import "code.google.com/p/rsc.x86/x86asm"
 
 func testFill(t *testing.T) {
   argv := []string{"testprograms/dimensional"}
-  inferior, err := ptrace.Exec(argv[0], argv)
+  inferior, err := startup(argv)
   if err != nil {
     t.Fatalf("can't exec child: %v", err)
   }
-  <- inferior.Events() // eat 'process is starting' event.
   defer inferior.Close()
-
-  if err := MainSync(argv[0], inferior) ; err != nil {
-    t.Fatalf("could not sync main: %v", err)
-  }
 
   symbols, err := bfd.SymbolsProcess(inferior)
   if err != nil {
@@ -62,18 +57,27 @@ func testFill(t *testing.T) {
   }
 }
 
-func testExecFill(t *testing.T) {
-  argv := []string{"testprograms/dimensional", "3"}
+func startup(argv []string) (*ptrace.Tracee, error) {
   inferior, err := ptrace.Exec(argv[0], argv)
   if err != nil {
-    t.Fatalf("can't exec child: %v", err)
+    return nil, err
   }
   <- inferior.Events() // eat 'process is starting' event.
-  defer inferior.Close()
 
   if err := MainSync(argv[0], inferior) ; err != nil {
-    t.Fatalf("could not sync main: %v", err)
+    inferior.Close()
+    return nil, err
   }
+  return inferior, nil
+}
+
+func testExecFill(t *testing.T) {
+  argv := []string{"testprograms/dimensional", "3"}
+  inferior, err := startup(argv)
+  if err != nil {
+    t.Fatalf("startup failed: %v", err)
+  }
+  defer inferior.Close()
 
   symbols, err := bfd.SymbolsProcess(inferior)
   if err != nil {
@@ -130,16 +134,11 @@ func testExecFill(t *testing.T) {
 
 func TestAllocInferior(t *testing.T) {
   argv := []string{"testprograms/dimensional", "3"}
-  inferior, err := ptrace.Exec(argv[0], argv)
+  inferior, err := startup(argv)
   if err != nil {
     t.Fatalf("can't exec child: %v", err)
   }
-  <- inferior.Events() // eat 'process is starting' event.
   defer inferior.Close()
-
-  if err := MainSync(argv[0], inferior) ; err != nil {
-    t.Fatalf("could not sync main: %v", err)
-  }
 
   symbols, err := bfd.SymbolsProcess(inferior)
   if err != nil {
