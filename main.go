@@ -392,7 +392,7 @@ func replace(slice []uint8, word int32) {
 // function that will posix_memalign-allocate some memory.
 // Returns the starting/ending addresses of the created code.
 func fspace_fill(inferior *ptrace.Tracee, addr uintptr,
-                 memalign uintptr) ([2]uintptr, error) {
+                 memalign uintptr) (uintptr, error) {
   // we're essentially defining the function:
   //   void* fqn(size_t n) {
   //     void* mem = NULL;
@@ -456,11 +456,11 @@ func fspace_fill(inferior *ptrace.Tracee, addr uintptr,
 
   // .. maybe we should read/save whatever code is already there, first?
   if err := inferior.Write(addr, memalign_code) ; err != nil {
-    return [2]uintptr{0x0,0x0}, err
+    return 0x0, err
   }
 
   end_addr := addr + uintptr(uint(len(memalign_code)))
-  return [2]uintptr{addr, end_addr}, nil
+  return end_addr, nil
   // next: save registers, overwrite current instruction pointer so we
   // 'call $addr', break somewhere inside this function so that we can
   // restore the old instruction pointer's value, finish our function,
