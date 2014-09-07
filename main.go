@@ -483,9 +483,6 @@ func fspace_fill(inferior *ptrace.Tracee, addr uintptr,
   malign_addr := addr + 23
   malign_end_addr := malign_addr + 5
   malign_reladdr := int64(memalign) - int64(malign_end_addr)
-  fmt.Printf("addr: %v (0x%0x)\n", addr, addr)
-  fmt.Printf("memalign is at: %v (0x%0x)\n", memalign, memalign)
-  fmt.Printf("reladdr: %v (0x%0x)\n", malign_reladdr, malign_reladdr)
   if malign_reladdr != int64(int32(malign_reladdr)) { // does it fit in 32bit?
     panic("can't encode jump to posix_memalign as a near call!")
   }
@@ -495,6 +492,7 @@ func fspace_fill(inferior *ptrace.Tracee, addr uintptr,
   replace(memalign_code[23+1:23+1+4], int32(malign_reladdr))
 
   // This is just for debugging, so we can see if what we put in there is valid.
+/*
   fmt.Printf("buf:\n")
   for i,v := range memalign_code {
     if i >= 23+1 && i < 23+1+4 { // the code (address) we are replacing.
@@ -506,6 +504,7 @@ func fspace_fill(inferior *ptrace.Tracee, addr uintptr,
   }
   fmt.Printf("\ndecoded:\n")
   decode_stdout(memalign_code)
+*/
 
   // .. maybe we should read/save whatever code is already there, first?
   if err := inferior.Write(addr, memalign_code) ; err != nil {

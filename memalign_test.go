@@ -32,30 +32,12 @@ func TestAllocInferior(t *testing.T) {
     t.Fatalf("could not read smbols: %v\n", err)
   }
 
-  malign := symbol("posix_memalign", symbols)
-  if malign == nil {
-    t.Fatalf("no posix_memalign symbol")
-  }
-
-  malloc := symbol("malloc", symbols)
-  if malloc == nil || malloc.Address() == 0x0 {
-    t.Fatalf("malloc symbol not available, symbtab broken?")
-  }
-
-  mmap := symbol("mmap", symbols)
-  if mmap == nil {
-    t.Fatalf("no mmap!")
-  }
-  main := symbol("main", symbols)
-  if main == nil {
-    t.Fatalf("no main!")
-  }
-
-  addr, err := alloc_inferior(inferior, mmap.Address(), main.Address())
+  addr, err := setup_tjfmalloc(inferior)
   if err != nil {
-    t.Fatalf("creating memory for our memalign: %v", err)
+    t.Fatalf("error inserting our malloc: %v", err)
   }
-  if addr < main.Address() {
+
+  if addr < symbol("main", symbols).Address() {
     t.Fatalf("address 0x%0x makes no sense", addr)
   }
 
@@ -96,13 +78,8 @@ func TestExecFill(t *testing.T) {
   retsite := stack.RetAddr(inferior)
   nbytes := stack.Arg1(inferior)
 
-  orig_regs, err := inferior.GetRegs()
-  if err != nil {
-    t.Fatalf("could not grab regs: %v", err)
-  }
   fmt.Printf("mallocing %v bytes but jumping to 0x%0x instead. Ret to: 0x%0x\n",
              nbytes, addr, retsite)
-  fmt.Printf("rip: 0x%0x\n", orig_regs.Rip)
   // now, instead, "jump" to our 'new' function.
   if err := inferior.SetIPtr(addr) ; err != nil {
     t.Fatalf("jumping to our in-mem function: %v", err)
@@ -112,7 +89,9 @@ func TestExecFill(t *testing.T) {
     t.Fatalf("never came back from our function? %v", err)
   }
   rval := stack.RetVal(inferior)
-  fmt.Printf("retval is: 0x%0x\n", rval)
+  if rval == 0x0 {
+    t.Fatalf("retval should not be null!")
+  }
 
   // insns_stdout(inferior)
   if err := inferior.Continue() ; err != nil {
