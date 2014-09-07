@@ -98,7 +98,7 @@ func TestExecFill(t *testing.T) {
 
   _, err = fspace_fill(inferior, addr, malign.Address())
   if err != nil {
-    t.Fatalf("could not create aligned function: %v", err)
+    t.Fatalf("error inserting our malloc: %v", err)
   }
 
   malloc := symbol("malloc", symbols)

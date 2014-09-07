@@ -298,7 +298,7 @@ func mallocs(argv []string) {
       break
     } else if err != nil {
       fmt.Fprintf(os.Stderr, "[go] application exited abnormally: %v\n", err)
-      break;
+      break
     }
     // At this point, we hit 'malloc'.  Let's examine the registers/stack to
     // figure out how many bytes were given to malloc, as well as where malloc
@@ -409,7 +409,7 @@ func fspace_fill(inferior *ptrace.Tracee, addr uintptr,
     0x48, 0xc7, 0x04, 0x24,                   // movq   $0x0,(%rsp)
       0x00, 0x00, 0x00, 0x00,                 // (this is the 0x0)
     //0xe8, 0xe4, 0xfe, 0xff, 0xff,           // callq  posix_memalign
-    // The FF's are an reloffset; we cannot know it statically.  See below.
+    // The FF's are a reloffset; we cannot know it statically.  See below.
     0xe8, 0xFF, 0xFF, 0xFF, 0xFF,             // callq  posix_memalign
     0x48, 0x8b, 0x04, 0x24,                   // mov    (%rsp),%rax
     0x48, 0x83, 0xc4, 0x18,                   // add    $0x18,%rsp
@@ -438,7 +438,6 @@ func fspace_fill(inferior *ptrace.Tracee, addr uintptr,
 
   // 23 bytes in is the 'e8' of our call.  We want to replace the argument,
   // which is 1 past that, and is 4 bytes long.
-  // I have no idea why the -4 is needed, but looking at the ouptut, it is.
   replace(memalign_code[23+1:23+1+4], int32(malign_reladdr))
 
   // This is just for debugging, so we can see if what we put in there is valid.
@@ -461,11 +460,6 @@ func fspace_fill(inferior *ptrace.Tracee, addr uintptr,
 
   end_addr := addr + uintptr(uint(len(memalign_code)))
   return end_addr, nil
-  // next: save registers, overwrite current instruction pointer so we
-  // 'call $addr', break somewhere inside this function so that we can
-  // restore the old instruction pointer's value, finish our function,
-  // restore registers except make sure we place our aligned alloc
-  // retval into the right place, rock.
 }
 
 func decode_stdout(memory []byte) {
@@ -504,7 +498,7 @@ func alloc_inferior(inferior *ptrace.Tracee, mmap uintptr,
   regs.Rsi = 0x1000 // length
   regs.Rdx = 0x5 // prot
   regs.Rcx = 0x22 // flags
-  regs.R8 = 0xffffffffffffffff // fd
+  regs.R8 = 0xffffffffffffffff // fd, aka -1
   regs.R9 = 0
   if int64(regs.R8) != -1 {
     return 0x0, fmt.Errorf("our 'fd' argument to mmap is incorrect..")
@@ -548,11 +542,12 @@ func alloc_inferior(inferior *ptrace.Tracee, mmap uintptr,
     return 0x0, err
   }
   if err := inferior.WriteWord(uintptr(regs.Rsp), save_stack) ; err != nil {
-    return 0x0, fmt.Errorf("could not update *%rsp with correct addr: %v", err)
+    return 0x0, fmt.Errorf("could not reset *%rsp with correct addr: %v", err)
   }
   return retval, nil
 }
 
+// dumps some instructions from the current insn ptr to stdout
 func insns_stdout(inferior *ptrace.Tracee) error {
   regs, err := inferior.GetRegs()
   if err != nil {
