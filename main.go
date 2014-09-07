@@ -4,6 +4,7 @@ import(
   "bufio"
   "bytes"
   "encoding/binary"
+  "errors"
   "flag"
   "fmt"
   "io"
@@ -266,6 +267,44 @@ func (x86_64) RetVal(inferior *ptrace.Tracee) uint64 {
   return regs.Rax
 }
 
+// We need to replace (some of) the inferior's mallocs with aligned
+// allocations, so that we can write-protect the regions.  The replacement
+// malloc must have the same signature; we think of ours as 'tjfmalloc'.
+// Returns the address of the inserted function in the inferior's address
+// space.
+func setup_tjfmalloc(inferior *ptrace.Tracee) (uintptr, error) {
+  symbols, err := bfd.SymbolsProcess(inferior)
+  if err != nil {
+    return 0x0, err
+  }
+  mmap := symbol("mmap", symbols)
+  if mmap == nil {
+    return 0x0, errors.New("'mmap' not in symbol list!")
+  }
+  main := symbol("main", symbols)
+  if main == nil {
+    return 0x0, errors.New("'main' not in symbol list!")
+  }
+
+  addr, err := alloc_inferior(inferior, mmap.Address(), main.Address())
+  if err != nil {
+    return 0x0, err
+  }
+
+  malign := symbol("posix_memalign", symbols)
+  if malign == nil {
+    return 0x0, errors.New("'posix_memalign' not in symbol list!")
+  }
+  _, err = fspace_fill(inferior, addr, malign.Address())
+  if err != nil {
+    return 0x0, err
+  }
+  return addr, nil
+}
+
+// runs a program, replacing every 'malloc' in a program with
+// 'tjfmalloc'---a faux malloc implementation that just forwards to
+// posix_memalign.
 func mallocs(argv []string) {
   inferior, err := ptrace.Exec(argv[0], argv)
   if err != nil {
@@ -289,6 +328,12 @@ func mallocs(argv []string) {
     inferior.SendSignal(syscall.SIGTERM)
     return
   }
+  tjfmalloc, err := setup_tjfmalloc(inferior)
+  if err != nil {
+    log.Fatalf("could not setup replacement malloc: %v\n", err)
+    inferior.SendSignal(syscall.SIGTERM)
+    return
+  }
 
   var stk x86_64
   for {
@@ -305,10 +350,19 @@ func mallocs(argv []string) {
     // is going to return to.
     nbytes := stk.Arg1(inferior)
     retsite := stk.RetAddr(inferior)
-    fmt.Printf("[go] malloc(%4d) -> ", nbytes)
 
-    err = debug.WaitUntil(inferior, retsite)
-    fmt.Printf("0x%08x\n", uintptr(stk.RetVal(inferior)))
+    // instead of letting it run, 'jump' to tjfmalloc.
+    if err := inferior.SetIPtr(tjfmalloc) ; err != nil {
+      log.Fatalf("could not reset iptr when replacing alloc: %v\n", err)
+      return
+    }
+    // now let it go, but stop when we come back from the function.
+    if err := debug.WaitUntil(inferior, retsite) ; err != nil {
+      log.Fatalf("waiting for tjfmalloc to complete: %v\n", err)
+      return
+    }
+    rval := stk.RetVal(inferior)
+    fmt.Printf("[go] malloc(%4d) -> 0x%08x\n", nbytes, uintptr(rval))
   }
   fmt.Printf("[go] inferior (%d) terminated.\n", inferior.PID())
 }

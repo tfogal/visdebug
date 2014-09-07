@@ -78,25 +78,7 @@ func TestExecFill(t *testing.T) {
     t.Fatalf("could not read smbols: %v\n", err)
   }
 
-  malign := symbol("posix_memalign", symbols)
-  if malign == nil {
-    t.Fatalf("no posix_memalign symbol")
-  }
-  mmap := symbol("mmap", symbols)
-  if mmap == nil {
-    t.Fatalf("no mmap!")
-  }
-  main := symbol("main", symbols)
-  if main == nil {
-    t.Fatalf("no main!")
-  }
-
-  addr, err := alloc_inferior(inferior, mmap.Address(), main.Address())
-  if err != nil {
-    t.Fatalf("error allocating mem in inferior: %v", err)
-  }
-
-  _, err = fspace_fill(inferior, addr, malign.Address())
+  addr, err := setup_tjfmalloc(inferior)
   if err != nil {
     t.Fatalf("error inserting our malloc: %v", err)
   }
