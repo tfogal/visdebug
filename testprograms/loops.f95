@@ -14,8 +14,8 @@ subroutine smooth2(v, nx, ny)
   integer :: x,y, nx,ny
   real, intent(inout) :: v(nx, ny)
 
-  do x = 1, nx-1
-    do y = 1, ny-1
+  do x = 2, nx-1
+    do y = 2, ny-1
       v(x,y) = (v(x-1,y-1) + v(x+0,y-1) + v(x+1,y-1) + &
                 v(x-1,y+0) + v(x+0,y+0) + v(x+1,y+0) + &
                 v(x-1,y+1) + v(x+0,y+1) + v(x+1,y+1)) / 9.0
