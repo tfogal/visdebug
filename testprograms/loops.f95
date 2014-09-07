@@ -19,6 +19,9 @@ subroutine smooth2(v, nx, ny)
       v(x,y) = (v(x-1,y-1) + v(x+0,y-1) + v(x+1,y-1) + &
                 v(x-1,y+0) + v(x+0,y+0) + v(x+1,y+0) + &
                 v(x-1,y+1) + v(x+0,y+1) + v(x+1,y+1)) / 9.0
+!      if(x == 5 .AND. y == 5) then
+!       print *, '5,5;2:', v(x,y)
+!     endif
     enddo
   enddo
 end subroutine smooth2
@@ -42,7 +45,7 @@ program loops
   allocate(arr2d(nx,30))
   do i = 1,nx
     do j = 1,30
-      arr2d(i,j) = i*j;
+      arr2d(i,j) = i*j*rand(0)
     enddo
   enddo
   print *, '2d-before(5,5):', arr2d(5,5)
