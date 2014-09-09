@@ -718,29 +718,24 @@ func symexec(inferior *ptrace.Tracee, addr uintptr) ([]register_file, error) {
       }
       rf[x86asm.RBP] = memaddr(regs.Rbp)
     } else {
-      rf = rfile[len(rfile)-1] // state comes from prev insn's state.
+      // initialize values with those from previous instruction
+      for k, val := range rfile[len(rfile)-1] {
+        rf[k] = val
+      }
     }
     rf[x86asm.RIP] = memaddr(addr)
 
-    fmt.Printf("0x%0x: %v\n", addr, ixn)
+    fmt.Printf("0x%08x: %v\n", addr, ixn)
     if ixn.Op == x86asm.MOV {
-      fmt.Println("a mov instruction!");
       src := movsource(ixn)
       srcreg, src_isreg := src.(x86asm.Reg)
       memref, src_ismem := src.(x86asm.Mem)
       srcconst, src_isconst := src.(x86asm.Imm)
       if src_isconst {
-        fmt.Printf("source is a constant: %v\n", srcconst)
         rf[movregtarget(ixn)] = constval(srcconst)
       } else if src_isreg {
-        fmt.Printf("source is register '%v'\n", srcreg)
-        // register := func(rfile, sreg x86asm.Reg) {
-        //   return the element of rfile that corresponds to sreg
-        // }
         rf[movregtarget(ixn)] = rf[srcreg]
       } else if src_ismem {
-        fmt.Printf("source is memory reference: %v\n", memref)
-        // rf[target(ixn)] = memref.Base // or maybe .Base+an offset?
         if memref.Base == x86asm.RIP {
           rf[movregtarget(ixn)] = memaddr(int64(addr) + memref.Disp)
         } else if memref.Base == x86asm.RBP {
@@ -784,7 +779,7 @@ func bind_identify(fqn string, node *cfg.Node,
     if err := debug.WaitUntil(inferior, hdr.Addr) ; err != nil {
       return nil, fmt.Errorf("waiting for loop header: %v", err)
     }
-    _, err := symexec(inferior, hdr.Addr) // hacked
+    _, err := symexec(inferior, hdr.Addr)
     if err != nil {
       return nil, err
     }
