@@ -629,11 +629,11 @@ type memaddr uintptr
 type unknown struct{}
 func (constval) isRegSource() {}
 func (c constval) String() string {
-  return fmt.Sprintf("$0x%0x", c)
+  return fmt.Sprintf("$0x%0x", uint64(c))
 }
 func (memaddr) isRegSource() {}
 func (m memaddr) String() string {
-  return fmt.Sprintf("0x%0x", m)
+  return fmt.Sprintf("0x%0x", uintptr(m))
 }
 func (unknown) isRegSource() {}
 func (u unknown) String() string {
