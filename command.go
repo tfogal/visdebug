@@ -619,6 +619,152 @@ func readreg(regref x86asm.Reg, inferior *ptrace.Tracee,
   return int64(v), nil
 }
 
+// The source of register data can be a constant or a memory address
+type regsource interface {
+  isRegSource()
+  String() string
+}
+type constval uint64
+type memaddr uintptr
+type unknown struct{}
+func (constval) isRegSource() {}
+func (c constval) String() string {
+  return fmt.Sprintf("$0x%0x", c)
+}
+func (memaddr) isRegSource() {}
+func (m memaddr) String() string {
+  return fmt.Sprintf("0x%0x", m)
+}
+func (unknown) isRegSource() {}
+func (u unknown) String() string {
+  return "unknown"
+}
+// this usually won't have entries for every register; lots of registers are
+// meaningless for our analysis.
+type register_file map[x86asm.Reg]regsource
+
+// x64-64 "mov"e instructions always have two operands: a source and a
+// target/destination.  This returns the source argument.
+func movsource(ixn x86asm.Inst) x86asm.Arg {
+  if ixn.Op != x86asm.MOV {
+    panic("should have been given a MOV instruction.")
+  }
+  return ixn.Args[1]
+}
+// x64-64 "mov"e instructions always have two operands: a source and a
+// target/destination.  This identifies the target operand and assumes it is a
+// register.  Bad things (tm) happen if it is not.
+func movregtarget(ixn x86asm.Inst) x86asm.Reg {
+  if ixn.Op != x86asm.MOV {
+    panic("should have been given a MOV instruction.")
+  }
+  _, isreg := ixn.Args[0].(x86asm.Reg)
+  if !isreg {
+    panic("target is not a register!  this is possible??")
+  }
+  return ixn.Args[0].(x86asm.Reg)
+}
+
+// symbolic execution of the inferior from the given address until the end of
+// its basic block.  For each assembly instruction we keep track of the
+// register data / source of its data.
+func symexec(inferior *ptrace.Tracee, addr uintptr) ([]register_file, error) {
+  insn := make([]byte, 16) // max length of an x86-64 insn is 16 bytes.
+  rfile := make([]register_file, 0)
+
+  { // Just for sanity's sake.
+  // Better: if iptr != addr, then we just initialize all the registers with
+  // unknown and return an error if an instruction makes e.g. a frame-relative
+  // reference (since we won't know RBP).
+  iptr, err := inferior.GetIPtr()
+  if err != nil {
+    return nil, err
+  }
+  if iptr != addr {
+    return nil, fmt.Errorf("iptr @ 0x%0x but addr is 0x%0x!\n", iptr, addr)
+  }
+  }
+
+  // foreach instruction until we exit the basic block...
+  for {
+    if err := inferior.Read(addr, insn) ; err != nil { return nil, err }
+
+    ixn, err := x86asm.Decode(insn, 64)
+    if err != nil { return nil, err }
+    fmt.Printf("0x%08x: %-25v | %-34s\n", addr, ixn, x86asm.IntelSyntax(ixn))
+
+    rf := make(register_file)
+    if(len(rfile) == 0) { // first instruction, initialize to unknowns
+      rf[x86asm.R8] = unknown{}
+      rf[x86asm.R9] = unknown{}
+      rf[x86asm.R10] = unknown{}
+      rf[x86asm.R11] = unknown{}
+      rf[x86asm.R12] = unknown{}
+      rf[x86asm.R13] = unknown{}
+      rf[x86asm.R14] = unknown{}
+      rf[x86asm.R15] = unknown{}
+      // we'll set RBP below, ignore it for now.
+      rf[x86asm.RBX] = unknown{}
+      rf[x86asm.RAX] = unknown{}
+      rf[x86asm.RCX] = unknown{}
+      rf[x86asm.RDX] = unknown{}
+      rf[x86asm.RSI] = unknown{}
+      rf[x86asm.RDI] = unknown{}
+      // ditto for setting RIP.
+      rf[x86asm.RSP] = unknown{}
+      regs, err := inferior.GetRegs()
+      if err != nil {
+        return nil, err
+      }
+      rf[x86asm.RBP] = memaddr(regs.Rbp)
+    } else {
+      rf = rfile[len(rfile)-1] // state comes from prev insn's state.
+    }
+    rf[x86asm.RIP] = memaddr(addr)
+
+    fmt.Printf("0x%0x: %v\n", addr, ixn)
+    if ixn.Op == x86asm.MOV {
+      fmt.Println("a mov instruction!");
+      src := movsource(ixn)
+      srcreg, src_isreg := src.(x86asm.Reg)
+      memref, src_ismem := src.(x86asm.Mem)
+      srcconst, src_isconst := src.(x86asm.Imm)
+      if src_isconst {
+        fmt.Printf("source is a constant: %v\n", srcconst)
+        rf[movregtarget(ixn)] = constval(srcconst)
+      } else if src_isreg {
+        fmt.Printf("source is register '%v'\n", srcreg)
+        // register := func(rfile, sreg x86asm.Reg) {
+        //   return the element of rfile that corresponds to sreg
+        // }
+        rf[movregtarget(ixn)] = rf[srcreg]
+      } else if src_ismem {
+        fmt.Printf("source is memory reference: %v\n", memref)
+        // rf[target(ixn)] = memref.Base // or maybe .Base+an offset?
+        if memref.Base == x86asm.RIP {
+          rf[movregtarget(ixn)] = memaddr(int64(addr) + memref.Disp)
+        } else if memref.Base == x86asm.RBP {
+          rbp := rf[x86asm.RBP].(memaddr) // rbp is always a memaddr.
+          rf[movregtarget(ixn)] = memaddr(int64(rbp) + memref.Disp)
+        } else {
+          return nil, fmt.Errorf("unknown rel mem reference in %v", ixn)
+        }
+      }
+    }
+    rfile = append(rfile, rf)
+
+    if conditional_jump(ixn) { // jump instruction.  basic block is done.
+      break
+    }
+    addr += uintptr(ixn.Len)
+    if ixn.Op == x86asm.JMP { // also follow jumps!
+      fmt.Printf("jmp-ing!  args: %v\n", ixn.Args[0])
+      addr += uintptr(ixn.Args[0].(x86asm.Rel))
+    }
+  }
+  return rfile, nil
+}
+
 // identify the bounds of the loop[s] of where we are now.
 // note this will execute the inferior a little bit.
 func bind_identify(fqn string, node *cfg.Node,
@@ -626,16 +772,29 @@ func bind_identify(fqn string, node *cfg.Node,
   dims := make([]uint, 0)
   for _, hdr := range node.Headers {
     if !hdr.LoopHeader() { panic("non-header in header list!") }
-    // This whole approach needs overhauled.
-    // We need to find the CMP instruction and run the inferior until then.
-    // We also need to do some data flow analysis to identify the *source* of
-    // both datums in the instruction.  We need to know the source so we can
-    // look it up in the debug info and figure out its signedness.
+
+    // We'll look for the "CMP" instruction in the loop header in a second: one
+    // of the operands of that instruction will tell us what the loop bound is.
+    // To identify the signedness of that operand, however, we need to know
+    // where it came from.  For that, we symbolically execute the basic block.
+    // That symbolic execution works a lot better if we can initialize the
+    // register set with *actual* values, but to do that we'd need to know the
+    // set of values on entry to the basic block.
+    // So: execute up until the basic block.
+    if err := debug.WaitUntil(inferior, hdr.Addr) ; err != nil {
+      return nil, fmt.Errorf("waiting for loop header: %v", err)
+    }
+    _, err := symexec(inferior, hdr.Addr) // hacked
+    if err != nil {
+      return nil, err
+    }
+
+    // Now, find the CMP instruction that should be in the basic block.
 
     // This is a bit painful, since there's lots of different ways the compiler
     // can encode the loop header.  If you find a program is dying with an
-    // io.EOF here, then the structure of your loop header is unknown and you
-    // need to add a case here.
+    // io.EOF here, then your compiler is giving a strange encoding for the CMP
+    // instruction that is fooling us; you'll need to add a case here.
     ixn, mraddr, err := find_2regmem([]x86asm.Op{x86asm.MOV, x86asm.CMP},
                                      x86asm.RIP, hdr.Addr, inferior)
     if err == io.EOF { // no such instruction, let's go for a different case.
@@ -658,10 +817,13 @@ func bind_identify(fqn string, node *cfg.Node,
       panic("displacement too small; makes no sense")
     }
 
-    // this needs to be better.  we might be looking at a CMP instruction of
-    // two registers, but the registers were loaded based on the frame pointer.
-    // Thus we need to look at the data flow and see not just what the thing
-    // being referenced is, but rather the source of its value.
+    // TODO this needs overhauled.  We need to find the CMP instruction; forget
+    // the MOVs.  Then, if the CMP references memory: great, just use the
+    // address to find the debug info and identify signedness.
+    // If the CMP references a register, we need to investigate the data
+    // structure that 'symexec' gave us: that'll tell us where the register's
+    // contents *came*from*, and we can use that source in our debug info
+    // lookup.
     signed := false
     if memref.Base == x86asm.RBP {
       signed, err = dbg_parameter_signed(fqn, memref.Disp)
