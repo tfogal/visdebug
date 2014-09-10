@@ -549,6 +549,35 @@ func find_2regmem(opcodes []x86asm.Op, reg x86asm.Reg, startaddr uintptr,
   }
 }
 
+// searches for the instruction with the given opcode and 2 arguments
+func find_2arg(opcodes []x86asm.Op, inferior *ptrace.Tracee,
+               startaddr uintptr) (x86asm.Inst, uintptr, error) {
+  insn := make([]byte, 16)
+  addr := startaddr
+  bad := x86asm.Inst{} // just a constant to return on error.
+  for {
+    if err := inferior.Read(addr, insn) ; err != nil { return bad, 0x0, err }
+
+    ixn, err := x86asm.Decode(insn, 64)
+    if err != nil { return bad, 0x0, err }
+
+    if conditional_jump(ixn) {
+      return bad, 0x0, io.EOF // i.e. exited BB before hitting opcode.
+    }
+
+    if opcode_in(ixn.Op, opcodes) && nargs(ixn.Args) == 2 {
+      return ixn, addr, nil
+    }
+
+    addr += uintptr(ixn.Len)
+    if ixn.Op == x86asm.JMP {
+      addr += uintptr(ixn.Args[0].(x86asm.Rel))
+    }
+  }
+  return x86asm.Inst{}, 0x0, errors.New("instruction not found")
+}
+
+
 // this is garbage.  we shouldn't need to hardcode this in.
 func endianconvert(u uint64) uint64 {
   buf := bytes.NewBuffer(make([]byte, 0))
