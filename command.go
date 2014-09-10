@@ -910,6 +910,82 @@ func sleb128(leb []uint8) int64 {
   return int64(result)
 }
 
+// Looks up the type of a global variable in the given program.
+func dbg_gvar_basetype(program string,
+                       offset uintptr) (dwarf.CommonType, error) {
+  bad := dwarf.CommonType{}
+  legolas, err := elf.Open(program)
+  if err != nil {
+    return bad, fmt.Errorf("error elf.Opening(%s): %v", program, err)
+  }
+  defer legolas.Close()
+
+  gimli, err := legolas.DWARF()
+  if err != nil {
+    return bad, fmt.Errorf("no dwarf info for %s? %v", program, err)
+  }
+
+  rdr := gimli.Reader()
+
+  for ent, err := rdr.Next(); ent != nil && err != io.EOF;
+      ent, err = rdr.Next() {
+    if err != nil {
+      return bad, err
+    }
+    if ent.Tag == dwarf.TagVariable {
+      loc, ok := ent.Val(dwarf.AttrLocation).([]uint8)
+      // if we can't grab the loc, this is probably a libc symbol, e.g. 'stdin'
+      if !ok {
+        continue
+      }
+
+      if loc[0] != 0x03 { // this isn't a DW_OP_addr, and thus not a global
+        continue
+      }
+
+      var addr uint64
+      buf := bytes.NewReader(loc[1:])
+      binary.Read(buf, binary.LittleEndian, &addr)
+      if uintptr(addr) == offset {
+        ty, err := dbg_base_type(ent)
+        if err != nil {
+          return bad, err
+        }
+        if ty.Tag != dwarf.TagBaseType { panic("dbg_base_type is buggy") }
+        typ, err := gimli.Type(ty.Offset)
+        if err != nil {
+          return bad, err
+        }
+        return *typ.Common(), nil
+      }
+    }
+  }
+
+  return bad, fmt.Errorf("offset %v not found", offset)
+}
+
+type cdebugvar struct {
+  offset string
+}
+// Looks up the debug information for the variable at the given offset.
+func (c cdebugvar) Execute(inferior *ptrace.Tracee) error {
+  offset, err := strconv.ParseUint(c.offset, 0, 64)
+  if err != nil {
+    return fmt.Errorf("cannot convert %v to an offset: %v\n", c.offset, err)
+  }
+
+  if err := verify_symbols_loaded(inferior) ; err != nil {
+    return err
+  }
+
+  typ, err := dbg_gvar_basetype(globals.program, uintptr(offset))
+  if err != nil {
+    return err
+  }
+  fmt.Printf("%v\n", typ)
+  return nil
+}
+
 func dbg_parameter_signed(fqnname string, offset int64) (bool, error) {
   legolas, err := elf.Open(globals.program)
   if err != nil { return false, err }
@@ -1161,6 +1237,9 @@ func parse_cmdline(line string) (Command) {
       if len(tokens) == 3 { return cdebuginfo{tokens[1], tokens[2]} }
       if len(tokens) == 2 { return cdebuginfo{tokens[1], ""} }
       return cparseerror{"invalid # of arguments."}
+    case "debugvar":
+      if len(tokens) == 2 { return cdebugvar{tokens[1]}}
+      return cparseerror{"not enough arguments"}
     default: return cgeneric{tokens}
   }
 }
