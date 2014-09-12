@@ -648,13 +648,17 @@ func readreg(regref x86asm.Reg, inferior *ptrace.Tracee,
   return int64(v), nil
 }
 
-// The source of register data can be a constant or a memory address
+// The source of data in a register can be:
+//   just a pure constant
+//   a raw memory address, usually indicating a global variable
+//   a framepointer-relative address (local variables only)
 type regsource interface {
   isRegSource()
   String() string
 }
 type constval uint64
 type memaddr uintptr
+type lvar int64 // lvar's are always fptr relative; we just store the relation
 type unknown struct{}
 func (constval) isRegSource() {}
 func (c constval) String() string {
@@ -663,6 +667,14 @@ func (c constval) String() string {
 func (memaddr) isRegSource() {}
 func (m memaddr) String() string {
   return fmt.Sprintf("0x%0x", uintptr(m))
+}
+func (lvar) isRegSource() {}
+func (l lvar) String() string {
+  rel := int64(l)
+  if rel >= 0 {
+    return fmt.Sprintf("[FPtr+%d]", rel)
+  }
+  return fmt.Sprintf("[FPtr%d]", rel)
 }
 func (unknown) isRegSource() {}
 func (u unknown) String() string {
@@ -768,8 +780,7 @@ func symexec(inferior *ptrace.Tracee, addr uintptr) ([]register_file, error) {
         if memref.Base == x86asm.RIP {
           rf[movregtarget(ixn)] = memaddr(int64(addr) + memref.Disp)
         } else if memref.Base == x86asm.RBP {
-          rbp := rf[x86asm.RBP].(memaddr) // rbp is always a memaddr.
-          rf[movregtarget(ixn)] = memaddr(int64(rbp) + memref.Disp)
+          rf[movregtarget(ixn)] = lvar(memref.Disp)
         } else {
           return nil, fmt.Errorf("unknown rel mem reference in %v", ixn)
         }
