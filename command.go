@@ -797,7 +797,8 @@ func symexec(inferior *ptrace.Tracee, addr uintptr) ([]register_file, error) {
         rf[movregtarget(ixn)] = rf[srcreg]
       } else if src_ismem {
         if memref.Base == x86asm.RIP {
-          rf[movregtarget(ixn)] = memaddr(int64(addr) + memref.Disp)
+          rf[movregtarget(ixn)] = memaddr(int64(addr) + int64(ixn.Len) +
+                                          memref.Disp)
         } else if memref.Base == x86asm.RBP {
           rf[movregtarget(ixn)] = lvar(memref.Disp)
         } else {
