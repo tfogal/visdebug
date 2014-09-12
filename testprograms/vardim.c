@@ -35,7 +35,7 @@ __attribute__((noinline)) static void smooth2(float* v) {
   }
   /* blah for correctness we need to do sides and bottom too, but blah. */
 }
-static size_t clamp(int64_t v, size_t max) {
+__attribute__((noinline)) static size_t clamp(int64_t v, size_t max) {
   if(v < 0) {
     return 0;
   }
