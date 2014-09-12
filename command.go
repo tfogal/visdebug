@@ -1046,6 +1046,18 @@ func (c cdebugvar) Execute(inferior *ptrace.Tracee) error {
   return nil
 }
 
+func type_signed(typ dwarf.CommonType) bool {
+  switch(typ.Name) {
+  case "float", "double", "int8_t", "int16_t", "int32_t", "int64_t":
+    return true
+  case "size_t", "uint8_t", "uint16_t", "uint32_t", "uint64_t":
+    return false
+  default:
+    fmt.Fprintf(os.Stderr, "unknown type '%s'\n", typ.Name)
+    panic("unknown type")
+  }
+}
+
 func dbg_parameter_signed(fqnname string, offset int64) (bool, error) {
   legolas, err := elf.Open(globals.program)
   if err != nil { return false, err }
@@ -1056,13 +1068,7 @@ func dbg_parameter_signed(fqnname string, offset int64) (bool, error) {
 
   typ, err := dbg_parameter_type(fqnname, gimli, offset)
   if err != nil { return false, err }
-  switch(typ.Name) {
-  case "float", "double", "int8_t", "int16_t", "int32_t", "int64_t":
-    return true, nil
-  case "size_t", "uint8_t", "uint16_t", "uint32_t", "uint64_t":
-    return false, nil
-  default: return false, fmt.Errorf("unknown type: '%v'\n", typ.Common().Name)
-  }
+  return type_signed(typ), nil
 }
 
 func print_type(entry *dwarf.Entry, rdr *dwarf.Reader) {
