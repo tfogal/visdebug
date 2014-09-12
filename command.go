@@ -684,6 +684,25 @@ func (u unknown) String() string {
 // meaningless for our analysis.
 type register_file map[x86asm.Reg]regsource
 
+// This was made specifically to match the format of a kernel oops, so that
+// readers of those dumps would feel at home.
+func (rf register_file) String() string {
+  s := make([]string,0)
+  s = append(s, fmt.Sprintf("RIP: %14v  RSP: %14v  RFLAGS: %14v",
+                            rf[x86asm.RIP], rf[x86asm.RSP], 0x0))
+  s = append(s, fmt.Sprintf("RAX: %14v  RBX: %14v  RCX: %14v",
+                            rf[x86asm.RAX], rf[x86asm.RBX], rf[x86asm.RCX]))
+  s = append(s, fmt.Sprintf("RDX: %14v  RSI: %14v  RDI: %14v",
+                            rf[x86asm.RDX], rf[x86asm.RSI], rf[x86asm.RDI]))
+  s = append(s, fmt.Sprintf("RBP: %14v   R8: %14v   R9: %14v",
+                            rf[x86asm.RBP], rf[x86asm.R8], rf[x86asm.R9]))
+  s = append(s, fmt.Sprintf("R10: %14v  R11: %14v  R12: %14v",
+                            rf[x86asm.R10], rf[x86asm.R11], rf[x86asm.R12]))
+  s = append(s, fmt.Sprintf("R13: %14v  R14: %14v  R15: %14v",
+                            rf[x86asm.R13], rf[x86asm.R14], rf[x86asm.R15]))
+  return strings.Join(s, "\n")
+}
+
 // x64-64 "mov"e instructions always have two operands: a source and a
 // target/destination.  This returns the source argument.
 func movsource(ixn x86asm.Inst) x86asm.Arg {
