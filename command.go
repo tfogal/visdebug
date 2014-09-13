@@ -972,17 +972,16 @@ func sleb128(leb []uint8) int64 {
 
 // Looks up the type of a global variable in the given program.
 func dbg_gvar_basetype(program string,
-                       offset uintptr) (dwarf.CommonType, error) {
-  bad := dwarf.CommonType{}
+                       offset uintptr) (dwarf.Type, error) {
   legolas, err := elf.Open(program)
   if err != nil {
-    return bad, fmt.Errorf("error elf.Opening(%s): %v", program, err)
+    return nil, fmt.Errorf("error elf.Opening(%s): %v", program, err)
   }
   defer legolas.Close()
 
   gimli, err := legolas.DWARF()
   if err != nil {
-    return bad, fmt.Errorf("no dwarf info for %s? %v", program, err)
+    return nil, fmt.Errorf("no dwarf info for %s? %v", program, err)
   }
 
   rdr := gimli.Reader()
@@ -990,7 +989,7 @@ func dbg_gvar_basetype(program string,
   for ent, err := rdr.Next(); ent != nil && err != io.EOF;
       ent, err = rdr.Next() {
     if err != nil {
-      return bad, err
+      return nil, err
     }
     if ent.Tag == dwarf.TagVariable {
       loc, ok := ent.Val(dwarf.AttrLocation).([]uint8)
@@ -1009,19 +1008,19 @@ func dbg_gvar_basetype(program string,
       if uintptr(addr) == offset {
         ty, err := dbg_base_type(ent)
         if err != nil {
-          return bad, err
+          return nil, err
         }
         if ty.Tag != dwarf.TagBaseType { panic("dbg_base_type is buggy") }
         typ, err := gimli.Type(ty.Offset)
         if err != nil {
-          return bad, err
+          return nil, err
         }
-        return *typ.Common(), nil
+        return typ, nil
       }
     }
   }
 
-  return bad, fmt.Errorf("offset %v not found", offset)
+  return nil, fmt.Errorf("offset %v not found", offset)
 }
 
 type cdebugvar struct {
@@ -1046,23 +1045,23 @@ func (c cdebugvar) Execute(inferior *ptrace.Tracee) error {
   return nil
 }
 
-func type_signed(typ dwarf.CommonType) bool {
+func type_signed(typ dwarf.Type) bool {
   switch {
-  case strings.Contains(typ.Name, "float"),
-       strings.Contains(typ.Name, "double"),
-       strings.Contains(typ.Name, "int8_t"),
-       strings.Contains(typ.Name, "int16_t"),
-       strings.Contains(typ.Name, "int32_t"),
-       strings.Contains(typ.Name, "int64_t"):
+  case strings.Contains(typ.String(), "float"),
+       strings.Contains(typ.String(), "double"),
+       strings.Contains(typ.String(), "int8_t"),
+       strings.Contains(typ.String(), "int16_t"),
+       strings.Contains(typ.String(), "int32_t"),
+       strings.Contains(typ.String(), "int64_t"):
     return true
-  case strings.Contains(typ.Name, "size_t"),
-       strings.Contains(typ.Name, "uint8_t"),
-       strings.Contains(typ.Name, "uint16_t"),
-       strings.Contains(typ.Name, "uint32_t"),
-       strings.Contains(typ.Name, "uint64_t"):
+  case strings.Contains(typ.String(), "size_t"),
+       strings.Contains(typ.String(), "uint8_t"),
+       strings.Contains(typ.String(), "uint16_t"),
+       strings.Contains(typ.String(), "uint32_t"),
+       strings.Contains(typ.String(), "uint64_t"):
     return false
   default:
-    fmt.Fprintf(os.Stderr, "unknown type: '%s'\n", typ.Name)
+    fmt.Fprintf(os.Stderr, "unknown type: '%v'\n", typ)
     panic("unknown type")
   }
 }
@@ -1122,14 +1121,13 @@ func dbg_base_type(entry *dwarf.Entry) (*dwarf.Entry, error) {
 
 // 'param' is given as an offset off of the frame pointer.
 func dbg_parameter_type(fqn string, dwf *dwarf.Data,
-                        offset int64) (dwarf.CommonType, error) {
+                        offset int64) (dwarf.Type, error) {
   // seems to be broken somehow, always returning a blank type....
-  bad := dwarf.CommonType{}
   rdr := dwf.Reader()
   entry, err := dbg_function(fqn, rdr)
-  if err != nil { return bad, err }
+  if err != nil { return nil, err }
   if !entry.Children {
-    return bad, fmt.Errorf("function %v has no children?", entry)
+    return nil, fmt.Errorf("function %v has no children?", entry)
   }
 
   for ent, err := rdr.Next(); ent != nil && ent.Tag != 0 && err != io.EOF;
@@ -1137,21 +1135,21 @@ func dbg_parameter_type(fqn string, dwf *dwarf.Data,
     if ent.Tag == dwarf.TagFormalParameter {
       val, ok := ent.Val(dwarf.AttrLocation).([]uint8)
       if !ok {
-        return bad, fmt.Errorf("location is not a byte array")
+        return nil, fmt.Errorf("location is not a byte array")
       }
       leb := sleb128(val)
       if leb == offset {
         ty, err := dbg_base_type(ent)
-        if err != nil { return bad, err }
+        if err != nil { return nil, err }
         if ty.Tag != dwarf.TagBaseType { panic("dbg_base_type is buggy") }
         typ, err := dwf.Type(ty.Offset)
-        if err != nil { return bad, err }
-        return *typ.Common(), nil
+        if err != nil { return nil, err }
+        return typ, nil
       }
     }
   }
 
-  return bad, fmt.Errorf("offset never found")
+  return nil, fmt.Errorf("offset never found")
 }
 
 type cdebuginfo struct {
