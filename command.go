@@ -1047,13 +1047,22 @@ func (c cdebugvar) Execute(inferior *ptrace.Tracee) error {
 }
 
 func type_signed(typ dwarf.CommonType) bool {
-  switch(typ.Name) {
-  case "float", "double", "int8_t", "int16_t", "int32_t", "int64_t":
+  switch {
+  case strings.Contains(typ.Name, "float"),
+       strings.Contains(typ.Name, "double"),
+       strings.Contains(typ.Name, "int8_t"),
+       strings.Contains(typ.Name, "int16_t"),
+       strings.Contains(typ.Name, "int32_t"),
+       strings.Contains(typ.Name, "int64_t"):
     return true
-  case "size_t", "uint8_t", "uint16_t", "uint32_t", "uint64_t":
+  case strings.Contains(typ.Name, "size_t"),
+       strings.Contains(typ.Name, "uint8_t"),
+       strings.Contains(typ.Name, "uint16_t"),
+       strings.Contains(typ.Name, "uint32_t"),
+       strings.Contains(typ.Name, "uint64_t"):
     return false
   default:
-    fmt.Fprintf(os.Stderr, "unknown type '%s'\n", typ.Name)
+    fmt.Fprintf(os.Stderr, "unknown type: '%s'\n", typ.Name)
     panic("unknown type")
   }
 }
