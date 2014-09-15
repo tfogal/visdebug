@@ -58,9 +58,15 @@ __attribute__((noinline)) static size_t clamp(int64_t v, size_t max) {
 })
 
 __attribute__((noinline)) static void smooth3(float* v) {
+#if 1
   for(int64_t k=0; (size_t)k < dims[2]; ++k) {
     for(int64_t j=0; (size_t)j < dims[1]; ++j) {
       for(int64_t i=0; (size_t)i < dims[0]; ++i) {
+#else
+  for(int64_t k=0; k < (int64_t)dims[2]; ++k) {
+    for(int64_t j=0; j < (int64_t)dims[1]; ++j) {
+      for(int64_t i=0; i < (int64_t)dims[0]; ++i) {
+#endif
         const size_t idx = (size_t)k*dims[0]*dims[1] + (size_t)j*dims[0] + i;
         /* technically 1D, but whatever... */
         v[idx] = (IDX3(i-1,j,k) + IDX3(i,j,k) + IDX3(i+1,j,k)) / 3.0f;
