@@ -590,8 +590,10 @@ func endianconvert(u uint64) uint64 {
   return val
 }
 
-func readmem(memref x86asm.Mem, inferior *ptrace.Tracee,
-             signed bool) (int64, error) {
+// reads the inferior's memory according to the given memory reference.  the
+// bits are copied into the uint64 retval; if the data are not a uint64, then
+// you should cast it manually.
+func readmem(memref x86asm.Mem, inferior *ptrace.Tracee) (uint64, error) {
   regs, err := inferior.GetRegs()
   if err != nil {
     return 0, fmt.Errorf("could not read regs: %v", err)
@@ -613,16 +615,10 @@ func readmem(memref x86asm.Mem, inferior *ptrace.Tracee,
   if err != nil {
     return 0, fmt.Errorf("reading value @ 0x%0x: %v", mr, err)
   }
-  if signed {
-    fmt.Printf("mem pre-conversion, val is: %v(0x%0x)\n", val, val)
-    val = endianconvert(val)
-    fmt.Printf("mem post-conversion, val is: %v(0x%0x)\n", val, val)
-  }
-  return int64(val), nil
+  return val, nil
 }
 
-func readreg(regref x86asm.Reg, inferior *ptrace.Tracee,
-             signed bool) (int64, error) {
+func readreg(regref x86asm.Reg, inferior *ptrace.Tracee) (uint64, error) {
   regs, err := inferior.GetRegs()
   if err != nil { return 0, err }
 
@@ -641,11 +637,7 @@ func readreg(regref x86asm.Reg, inferior *ptrace.Tracee,
   default: panic("unhandled case")
   }
 
-  if signed {
-    fmt.Printf("pre-conversion, regval is: %v(0x%0x)\n", v, v)
-    v = endianconvert(v)
-  }
-  return int64(v), nil
+  return v, nil
 }
 
 // The source of data in a register can be:
@@ -751,7 +743,6 @@ func symexec(inferior *ptrace.Tracee, addr uintptr) ([]register_file, error) {
 
     ixn, err := x86asm.Decode(insn, 64)
     if err != nil { return nil, err }
-    fmt.Printf("0x%08x: %-25v | %-34s\n", addr, ixn, x86asm.IntelSyntax(ixn))
 
     rf := make(register_file)
     if(len(rfile) == 0) { // first instruction, initialize to unknowns
@@ -785,7 +776,6 @@ func symexec(inferior *ptrace.Tracee, addr uintptr) ([]register_file, error) {
     }
     rf[x86asm.RIP] = memaddr(addr)
 
-    fmt.Printf("0x%08x: %v\n", addr, ixn)
     if ixn.Op == x86asm.MOV {
       src := movsource(ixn)
       srcreg, src_isreg := src.(x86asm.Reg)
@@ -820,6 +810,127 @@ func symexec(inferior *ptrace.Tracee, addr uintptr) ([]register_file, error) {
   return rfile, nil
 }
 
+type value struct {
+  v uint64
+  typ debug.Type
+}
+
+// identifies the larger of the two 'value's.  it is assumed that these are
+// arguments for a loop index that describes a data array.  if that's the case,
+// then they are positive.. even if they are stored in signed containers.  if
+// they weren't positive, then that'd mean we had loop indices like this:
+//   for(int x=whatever; x > -42; x--) { ... }
+// which is of course implausible in a simulation program, at least in loops
+// we'd care about.
+func maxvalue(args [2]value) (int64) {
+  if !args[0].typ.Signed() && !args[1].typ.Signed() { // both unsigned
+    if args[0].v > args[1].v {
+      return int64(args[0].v)
+    }
+    return int64(args[1].v)
+  } else { // at least one is signed.  just cast them both to signed.
+    v1 := int64(args[0].v)
+    v2 := int64(args[1].v)
+    if v1 > v2 {
+      return v1
+    }
+    return v2
+  }
+  panic("all cases should have been covered!")
+}
+
+// given a (CMP) instruction and its corresponding register_file setting from
+// symbolic execution, give back the two values that are its arguments.
+func readargs(ixn x86asm.Inst, rf register_file, fqn string,
+              inferior *ptrace.Tracee) ([2]value, error) {
+  bad := [2]value{value{}, value{}}
+  var err error
+
+  values := [2]value{}
+  values[0], err = readvalue(ixn.Args[0], ixn.Len, rf, fqn, inferior)
+  if err != nil {
+    return bad, err
+  }
+  //fmt.Printf("read value 0: %d, %v\n", values[0].v, values[0].typ)
+  values[1], err = readvalue(ixn.Args[1], ixn.Len, rf, fqn, inferior)
+  if err != nil {
+    return bad, err
+  }
+  //fmt.Printf("read value 1: %d, %v\n", values[1].v, values[1].typ)
+
+  return values, nil
+}
+
+// gives back a 'value' for the given argument of an instruction.
+func readvalue(arg x86asm.Arg, ixnlen int, rf register_file, fqn string,
+               inferior *ptrace.Tracee) (value, error) {
+  reg, isreg := arg.(x86asm.Reg)
+  if isreg {
+    lv, src_local := rf[reg].(lvar)
+    maddr, src_memaddr := rf[reg].(memaddr)
+
+    var typ debug.Type
+    var err error
+    if src_local {
+      typ, err = debug.TypeLocal(globals.program, fqn, int64(lv))
+      if err != nil {
+        return value{}, fmt.Errorf("lvar type lookup: %v", err)
+      }
+    }
+    if src_memaddr {
+      typ, err = debug.TypeGlobalVar(globals.program, uintptr(maddr))
+      if err != nil {
+        return value{}, err
+      }
+    }
+
+    regarg, err := readreg(reg, inferior)
+    if err != nil {
+      return value{}, err
+    }
+    return value{v: regarg, typ: typ}, nil
+  }
+
+  mem, ismem := arg.(x86asm.Mem)
+  if ismem {
+    // insn ptr addresses are relative to the NEXT instruction, not this one.
+    if mem.Base == x86asm.RIP {
+      mem.Disp += int64(ixnlen)
+    }
+
+    memarg, err := readmem(mem, inferior)
+    if err != nil {
+      return value{}, err
+    }
+    if mem.Base == x86asm.RBP {
+      typ, err := debug.TypeLocal(globals.program, fqn, mem.Disp)
+      if err != nil {
+        return value{}, err
+      }
+      return value{v: memarg, typ: typ}, nil
+    }
+    if mem.Base == x86asm.RIP {
+      address := int64(rf[x86asm.RIP].(memaddr)) + mem.Disp
+      typ, err := debug.TypeGlobalVar(globals.program, uintptr(address))
+      if err != nil {
+        return value{}, err
+      }
+      return value{v: memarg, typ: typ}, nil
+    }
+  }
+  panic("argument is not register *or* memory?!")
+}
+
+// finds the register file associated with the given instruction.
+func rfaddr(insns []register_file, addr uintptr) register_file {
+  for _, r := range insns {
+    if uintptr(r[x86asm.RIP].(memaddr)) == addr {
+      return r
+    }
+  }
+  return nil
+}
+
 // identify the bounds of the loop[s] of where we are now.
 // note this will execute the inferior a little bit.
 func bind_identify(fqn string, node *cfg.Node,
@@ -839,72 +950,33 @@ func bind_identify(fqn string, node *cfg.Node,
     if err := debug.WaitUntil(inferior, hdr.Addr) ; err != nil {
       return nil, fmt.Errorf("waiting for loop header: %v", err)
     }
-    _, err := symexec(inferior, hdr.Addr)
+    insn_regs, err := symexec(inferior, hdr.Addr)
     if err != nil {
       return nil, err
     }
 
     // Now, find the CMP instruction that should be in the basic block.
-
-    // This is a bit painful, since there's lots of different ways the compiler
-    // can encode the loop header.  If you find a program is dying with an
-    // io.EOF here, then your compiler is giving a strange encoding for the CMP
-    // instruction that is fooling us; you'll need to add a case here.
-    ixn, mraddr, err := find_2regmem([]x86asm.Op{x86asm.MOV, x86asm.CMP},
-                                     x86asm.RIP, hdr.Addr, inferior)
+    ixn, cmpaddr, err := find_2arg([]x86asm.Op{x86asm.CMP}, inferior, hdr.Addr)
     if err == io.EOF { // no such instruction, let's go for a different case.
-      fmt.Printf("searching for frame-relative memref in CMP instruction...\n")
-      ixn, mraddr, err = find_2regmem([]x86asm.Op{x86asm.CMP}, x86asm.RBP,
-                                      hdr.Addr, inferior)
+      return nil, errors.New("no CMP instruction in loop header BB?")
     }
     if err != nil { return nil, err }
 
-    // now wait until we hit that instruction, whatever it is.
-    fmt.Printf("waiting until 0x%0x\n", mraddr)
-    if err := debug.WaitUntil(inferior, mraddr) ; err != nil {
+    // execute up until the comp, so registers/mem are valid to read
+    if err := debug.WaitUntil(inferior, cmpaddr) ; err != nil {
       return nil, err
     }
+    if ixn.Op != x86asm.CMP { panic("not at CMP instruction?") }
 
-    memref := ixn.Args[1].(x86asm.Mem)
-    // some checks to make sure the instruction is as we think...
-    assert(memref.Base == x86asm.RIP || memref.Base == x86asm.RBP)
-    if memref.Base == x86asm.RIP && memref.Disp < 0x100 {
-      panic("displacement too small; makes no sense")
+    // which entry in insn_regs is for the CMP instruction?
+    rf := rfaddr(insn_regs, cmpaddr)
+    if rf == nil { panic("compare addr not found, broken logic.") }
+
+    values, err := readargs(ixn, rf, fqn, inferior)
+    if err != nil {
+      return nil, err
     }
-
-    // TODO this needs overhauled.  We need to find the CMP instruction; forget
-    // the MOVs.  Then, if the CMP references memory: great, just use the
-    // address to find the debug info and identify signedness.
-    // If the CMP references a register, we need to investigate the data
-    // structure that 'symexec' gave us: that'll tell us where the register's
-    // contents *came*from*, and we can use that source in our debug info
-    // lookup.
-    signed := false
-    if memref.Base == x86asm.RBP {
-      signed, err = dbg_parameter_signed(fqn, memref.Disp)
-      if signed {
-        fmt.Printf("memory value is signed, signing its read.")
-      }
-      if err != nil { return nil, err }
-    }
-    // before we read, make sure we're at the cmp instruction.
-    if ixn.Op != x86asm.CMP {
-      fmt.Printf("not quite at CMP.  stepping...\n")
-      if err := inferior.SingleStep() ; err != nil {
-        return nil, err
-      }
-    }
-
-    memarg, err := readmem(memref, inferior, signed)
-    if err != nil { return nil, err }
-
-    // fixme: figure out if the reg argument is signed (need DFlow analysis)
-    regarg, err := readreg(ixn.Args[0].(x86asm.Reg), inferior, false)
-    if err != nil { return nil, err }
-    fmt.Printf("reg, mem: %v, %v\n", regarg, memarg)
-
-    larger := regarg
-    if memarg > regarg { larger = memarg }
+    larger := maxvalue(values)
 
     dims = append(dims, uint(larger))
 
@@ -1058,7 +1130,8 @@ func type_signed(typ dwarf.Type) bool {
        strings.Contains(typ.String(), "uint8_t"),
        strings.Contains(typ.String(), "uint16_t"),
        strings.Contains(typ.String(), "uint32_t"),
-       strings.Contains(typ.String(), "uint64_t"):
+       strings.Contains(typ.String(), "uint64_t"),
+       strings.Contains(typ.String(), "unsigned"):
     return false
   default:
     fmt.Fprintf(os.Stderr, "unknown type: '%v'\n", typ)
@@ -1074,7 +1147,7 @@ func dbg_parameter_signed(fqnname string, offset int64) (bool, error) {
   gimli, err := legolas.DWARF()
   if err != nil { return false, err }
 
-  typ, err := dbg_parameter_type(fqnname, gimli, offset)
+  typ, err := dbg_local_type(fqnname, gimli, offset)
   if err != nil { return false, err }
   return type_signed(typ), nil
 }
@@ -1119,20 +1192,29 @@ func dbg_base_type(entry *dwarf.Entry) (*dwarf.Entry, error) {
 }
 
 
-// 'param' is given as an offset off of the frame pointer.
-func dbg_parameter_type(fqn string, dwf *dwarf.Data,
-                        offset int64) (dwarf.Type, error) {
-  // seems to be broken somehow, always returning a blank type....
+// looks up the type for any 'local' of the given function.  this could be a
+// parameter or a variable.
+// 'param' is assumed to be an offset off of the frame pointer.
+func dbg_local_type(fqn string, dwf *dwarf.Data,
+                    offset int64) (dwarf.Type, error) {
   rdr := dwf.Reader()
   entry, err := dbg_function(fqn, rdr)
   if err != nil { return nil, err }
   if !entry.Children {
     return nil, fmt.Errorf("function %v has no children?", entry)
   }
+  if entry.Tag != dwarf.TagSubprogram {
+    panic("dbg_function didn't find a function?")
+  }
 
-  for ent, err := rdr.Next(); ent != nil && ent.Tag != 0 && err != io.EOF;
-      ent, err = rdr.Next() {
-    if ent.Tag == dwarf.TagFormalParameter {
+  for ent, err := rdr.Next(); err != io.EOF; ent, err = rdr.Next() {
+    if err == io.EOF {
+      break
+    }
+    if ent == nil && err == nil {
+      break
+    }
+    if ent.Tag == dwarf.TagFormalParameter || ent.Tag == dwarf.TagVariable {
       val, ok := ent.Val(dwarf.AttrLocation).([]uint8)
       if !ok {
         return nil, fmt.Errorf("location is not a byte array")
@@ -1149,7 +1231,7 @@ func dbg_parameter_type(fqn string, dwf *dwarf.Data,
     }
   }
 
-  return nil, fmt.Errorf("offset never found")
+  return nil, fmt.Errorf("offset %d in func %s never found", offset, fqn)
 }
 
 type cdebuginfo struct {
@@ -1192,7 +1274,7 @@ func (c cdebuginfo) Execute(inferior *ptrace.Tracee) error {
   if offset == 0 {
     return nil
   }
-  typ, err := dbg_parameter_type(c.fqn, gimli, offset)
+  typ, err := dbg_local_type(c.fqn, gimli, offset)
   if err != nil { return err }
   fmt.Printf("type: %v\n", typ)
 
