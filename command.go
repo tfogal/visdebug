@@ -1262,6 +1262,18 @@ func (c cread) Execute(inferior *ptrace.Tracee) error {
   return nil
 }
 
+type chex struct{
+  value string
+}
+func (c chex) Execute(inferior *ptrace.Tracee) error {
+  ival, err := strconv.ParseInt(c.value, 0, 64)
+  if err != nil {
+    return err
+  }
+  fmt.Printf("0x%0x\n", ival)
+  return nil
+}
+
 func parse_cmdline(line string) (Command) {
   tokens := strings.Split(line, " ")
   if len(tokens) == 0 { return cparseerror{"no tokens"} }
@@ -1312,6 +1324,9 @@ func parse_cmdline(line string) (Command) {
       return cparseerror{"invalid # of arguments."}
     case "debugvar":
       if len(tokens) == 2 { return cdebugvar{tokens[1]}}
+      return cparseerror{"not enough arguments"}
+    case "hex":
+      if len(tokens) == 2 { return chex{tokens[1]}}
       return cparseerror{"not enough arguments"}
     default: return cgeneric{tokens}
   }
