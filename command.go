@@ -301,7 +301,11 @@ func (c ccfg) Execute(inferior *ptrace.Tracee) (error) {
       if err != nil { return err }
     }
     printer := func(node *cfg.Node) { dotNode(node, writer) }
-    fmt.Fprintf(writer, "digraph %s {\n", symb.Name())
+    // graphviz doesn't accept "."s in a name, yet gcc sometimes creates
+    // symbols with "."s in them.  filter them out.
+    name := strings.Replace(symb.Name(), ".", "_", -1)
+    name = strings.Replace(name, "-", "_", -1) // ditto for "-"
+    fmt.Fprintf(writer, "digraph %s {\n", name)
     fmt.Fprintf(writer, "\tranksep=\"0.2 equally\";\n\tratio=0.7;\n")
     inorder(graph, printer)
     fmt.Fprintf(writer, "}\n")
