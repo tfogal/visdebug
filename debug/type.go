@@ -49,7 +49,7 @@ type dwarfEntry interface {
 type dwfFunction struct {
   name string
 }
-func (df *dwfFunction) Match(entry *dwarf.Entry) (bool, bool) {
+func (df dwfFunction) Match(entry *dwarf.Entry) (bool, bool) {
   if entry.Tag == dwarf.TagSubprogram {
     for _, fld := range entry.Field { // can this just be done with ent.Val.(x)?
       if fld.Attr == dwarf.AttrName && fld.Val.(string) == df.name {
@@ -66,7 +66,7 @@ func (df *dwfFunction) Match(entry *dwarf.Entry) (bool, bool) {
 type dwfGlobalVar struct {
   addr uintptr
 }
-func (df *dwfGlobalVar) Match(entry *dwarf.Entry) (bool, bool) {
+func (df dwfGlobalVar) Match(entry *dwarf.Entry) (bool, bool) {
   if entry.Tag == dwarf.TagSubprogram {
     // a global var won't be a child of a function.
     return false, false
@@ -96,7 +96,7 @@ func (df *dwfGlobalVar) Match(entry *dwarf.Entry) (bool, bool) {
 }
 
 type dwfPrintFuncs struct {}
-func (df *dwfPrintFuncs) Match(entry *dwarf.Entry) (bool, bool) {
+func (df dwfPrintFuncs) Match(entry *dwarf.Entry) (bool, bool) {
   if entry.Tag == dwarf.TagSubprogram {
     fmt.Printf("func: %s\n", function(entry))
     if function(entry) != "clamp" {
@@ -111,7 +111,7 @@ type dwfLocal struct {
   fqn string
 }
 // Returns true if the entry is for the given local variable.
-func (df *dwfLocal) Match(entry *dwarf.Entry) (bool, bool) {
+func (df dwfLocal) Match(entry *dwarf.Entry) (bool, bool) {
   if entry.Tag == dwarf.TagSubprogram {
     // if this is a function, but not the one we're looking for, then its whole
     // subtree is junk.  prune it.
@@ -213,7 +213,7 @@ func TypeGlobalVar(program string, address uintptr) (Type, error) {
   // doing this until we find *something*, then check if the something we found
   // extends beyond the access address we're looking for.
   for addr := address; ent == nil && addr > 0x400000; addr -= 0x1 {
-    ent, err = searchfor(program, &dwfGlobalVar{addr: addr})
+    ent, err = searchfor(program, dwfGlobalVar{addr: addr})
     if err == io.EOF {
       continue
     }
@@ -250,7 +250,7 @@ func TypeGlobalVar(program string, address uintptr) (Type, error) {
 // identifies a local (parameter or local variable), described by a (fqn,
 // offset-off-of-fptr) pair.
 func TypeLocal(program string, fqn string, rel int64) (Type, error) {
-  entry, err := searchfor(program, &dwfLocal{fbrel: rel, fqn: fqn})
+  entry, err := searchfor(program, dwfLocal{fbrel: rel, fqn: fqn})
   if err != nil {
     return Type{}, err
   }
