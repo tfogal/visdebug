@@ -794,7 +794,7 @@ func symexec(inferior *ptrace.Tracee, addr uintptr) ([]register_file, error) {
           rf[movregtarget(ixn)] = memaddr(int64(addr) + int64(ixn.Len) +
                                           memref.Disp)
         } else if memref.Base == x86asm.RBP {
-          rf[movregtarget(ixn)] = lvar(memref.Disp)
+          rf[movregtarget(ixn)] = lvar(int32(memref.Disp))
         } else {
           return nil, fmt.Errorf("unknown rel mem reference in %v", ixn)
         }
