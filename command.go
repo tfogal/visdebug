@@ -772,6 +772,7 @@ func symexec(inferior *ptrace.Tracee, addr uintptr) ([]register_file, error) {
         return nil, err
       }
       rf[x86asm.RBP] = memaddr(regs.Rbp)
+      rf[x86asm.RAX] = memaddr(regs.Rax)
     } else {
       // initialize values with those from previous instruction
       for k, val := range rfile[len(rfile)-1] {
@@ -780,6 +781,7 @@ func symexec(inferior *ptrace.Tracee, addr uintptr) ([]register_file, error) {
     }
     rf[x86asm.RIP] = memaddr(addr)
 
+    //fmt.Printf("0x%08x: %v\n", addr, ixn)
     if ixn.Op == x86asm.MOV {
       src := movsource(ixn)
       srcreg, src_isreg := src.(x86asm.Reg)
@@ -796,9 +798,28 @@ func symexec(inferior *ptrace.Tracee, addr uintptr) ([]register_file, error) {
         } else if memref.Base == x86asm.RBP {
           rf[movregtarget(ixn)] = lvar(int32(memref.Disp))
         } else {
-          return nil, fmt.Errorf("unknown rel mem reference in %v", ixn)
+          refconst, ref_isconst := rf[memref.Base].(constval)
+          refaddr, ref_isaddr := rf[memref.Base].(memaddr)
+          refvar, ref_isvar := rf[memref.Base].(lvar)
+          if ref_isconst {
+            rf[movregtarget(ixn)] = refconst
+          } else if ref_isaddr {
+            rf[movregtarget(ixn)] = refaddr
+            // want to see an example in the wild; make it stand out for now
+            // by returning an error so i can examine this when it happens.
+            return nil, fmt.Errorf("not sure this is right, being cautious..")
+          } else if ref_isvar {
+            rf[movregtarget(ixn)] = refvar
+          } else {
+            // if it's a reference to a reference, then we'd need to repeat
+            // this whole if crap.. again.  we should really have made this
+            // a method and recursed.. but instead it's just hacked, and
+            // thus broken if we get here.
+            return nil, fmt.Errorf("recursion too shallow.")
+          }
         }
       }
+      //fmt.Printf("%v\n", rf)
     }
     rfile = append(rfile, rf)
 
