@@ -907,7 +907,7 @@ func readvalue(arg x86asm.Arg, ixnlen int, rf register_file, fqn string,
       return value{}, err
     }
     if mem.Base == x86asm.RBP {
-      typ, err := debug.TypeLocal(globals.program, fqn, mem.Disp)
+      typ, err := debug.TypeLocal(globals.program, fqn, int64(int32(mem.Disp)))
       if err != nil {
         return value{}, err
       }
