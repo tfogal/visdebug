@@ -827,7 +827,15 @@ type value struct {
 // which is of course implausible in a simulation program, at least in loops
 // we'd care about.
 func maxvalue(args [2]value) (int64) {
-  if !args[0].typ.Signed() && !args[1].typ.Signed() { // both unsigned
+  if args[0].typ.Type == nil || args[1].typ.Type == nil {
+    // no type info.  pretend they're signed.
+    v1 := int64(args[0].v)
+    v2 := int64(args[1].v)
+    if v1 > v2 {
+      return v1
+    }
+    return v2
+  } else if !args[0].typ.Signed() && !args[1].typ.Signed() { // both unsigned
     if args[0].v > args[1].v {
       return int64(args[0].v)
     }
@@ -878,13 +886,17 @@ func readvalue(arg x86asm.Arg, ixnlen int, rf register_file, fqn string,
     if src_local {
       typ, err = debug.TypeLocal(globals.program, fqn, int64(lv))
       if err != nil {
-        return value{}, fmt.Errorf("lvar type lookup: %v", err)
+        fmt.Fprintf(os.Stderr, "Lvar type (%s, 0x%0x) lookup error: %v\n", fqn,
+                    int64(lv), err)
+        typ = debug.Type{}
       }
     }
     if src_memaddr {
       typ, err = debug.TypeGlobalVar(globals.program, uintptr(maddr))
       if err != nil {
-        return value{}, err
+        fmt.Fprintf(os.Stderr, "Gvar (0x%0x) lookup error: %v\n",
+                    uintptr(maddr), err)
+        typ = debug.Type{}
       }
     }
 
@@ -909,7 +921,9 @@ func readvalue(arg x86asm.Arg, ixnlen int, rf register_file, fqn string,
     if mem.Base == x86asm.RBP {
       typ, err := debug.TypeLocal(globals.program, fqn, int64(int32(mem.Disp)))
       if err != nil {
-        return value{}, err
+        fmt.Fprintf(os.Stderr, "lvar type (%s, 0x%0x) lookup error: %v\n", fqn,
+                    int32(mem.Disp), err)
+        typ = debug.Type{}
       }
       return value{v: memarg, typ: typ}, nil
     }
@@ -917,7 +931,9 @@ func readvalue(arg x86asm.Arg, ixnlen int, rf register_file, fqn string,
       address := int64(rf[x86asm.RIP].(memaddr)) + mem.Disp
       typ, err := debug.TypeGlobalVar(globals.program, uintptr(address))
       if err != nil {
-        return value{}, err
+        fmt.Fprintf(os.Stderr, "gvar (0x%0x) lookup error: %v\n",
+                    uintptr(address), err)
+        typ = debug.Type{}
       }
       return value{v: memarg, typ: typ}, nil
     }
