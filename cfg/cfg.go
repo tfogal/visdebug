@@ -262,15 +262,39 @@ func loop_headers_helper(node *Node, seen map[uintptr]bool, elist []biEdge) {
   if seen[node.Addr] { return }
   seen[node.Addr] = true
 
-  // a loop header is a basic block with 2 in-edges and 2 out-edges that is
-  // reachable from one or both of those out-edges.
-  // TODO: switch statements seem to produce duplicate BS edges; we will need
-  // to filter those out for this analysis to be valid.
-  // TODO: above definition is invalid in the presence of gotos.  Do we care?
-  in, out := in_edges(node, elist), out_edges(node, elist)
+  // a loop header is a basic block that:
+  //   * has 2 in-edges
+  //   * has 2 out-edges
+  //   * is reachable from one or both out-edges
+  //   * is dominated by exactly one in-edge
+  //   * the dominating in-edge does not directly-dominate the other in-edge
+  // TODO: above definition is invalid in the presence of gotos?  Do we care?
+  in, out := n_in_edges(node, elist), n_out_edges(node, elist)
   if in == 2 && out == 2 {
-    if Reachable(node, node.Edgelist[0].To) ||
-       Reachable(node, node.Edgelist[1].To) {
+    ins := in_edges(node, elist)
+    ndom := 0
+    if ins[0].To.Addr != node.Addr { panic("in_edges is broken") }
+    if ins[1].To.Addr != node.Addr { panic("in_edges is broken") }
+    // exactly one in-edge dominates ...
+    if ( dominates(ins[0].From, node) && !dominates(ins[1].From, node)) ||
+       (!dominates(ins[0].From, node) &&  dominates(ins[1].From, node)) {
+      ndom = 1
+    }
+    // further, if either in-edge dominates the other in-edge, then this isn't
+    // a loop header.
+    // if either in-edge directly-dominates the other in-edge, not a header.
+    for _, e := range elist {
+      if (e.From.Addr == ins[0].From.Addr && e.To.Addr == ins[1].From.Addr) ||
+         (e.From.Addr == ins[1].From.Addr && e.To.Addr == ins[0].From.Addr) {
+        ndom = 0
+      }
+    }
+
+    r := [2]bool{Reachable(node, node.Edgelist[0].To),
+                 Reachable(node, node.Edgelist[1].To)}
+    d := [2]bool{dominates(node, node.Edgelist[0].To),
+                 dominates(node, node.Edgelist[1].To)}
+    if (r[0] || r[1]) && d[0] && d[1] && ndom == 1 {
       node.flags |= loopHeader
     }
   }
@@ -280,15 +304,21 @@ func loop_headers_helper(node *Node, seen map[uintptr]bool, elist []biEdge) {
 }
 
 // counts the number of edges which lead in to 'node'.
-func in_edges(node *Node, elist []biEdge) uint {
-  n := uint(0)
+func n_in_edges(node *Node, elist []biEdge) uint {
+  return uint(len(in_edges(node, elist)))
+}
+
+func in_edges(node *Node, elist []biEdge) []biEdge {
+  lst := make([]biEdge, 0)
   for _, e := range elist {
-    if e.To == node { n++ }
+    if e.To == node {
+      lst = append(lst, e)
+    }
   }
-  return n
+  return lst
 }
 // counts the number of edges which lead out of 'node'.
-func out_edges(node *Node, elist []biEdge) uint {
+func n_out_edges(node *Node, elist []biEdge) uint {
   n := uint(0)
   for _, e := range elist {
     if e.From == node { n++ }
@@ -355,6 +385,16 @@ func depthcalc_helper(node *Node, seen map[uintptr]bool, elist []biEdge) {
   for _, e := range node.Edgelist {
     depthcalc_helper(e.To, seen, elist)
   }
+}
+
+// dominates is true if node1 dominates node2.
+func dominates(n1 *Node, n2 *Node) bool {
+  for d := range n2.dominators.set {
+    if n1.Addr == d {
+      return true
+    }
+  }
+  return false
 }
 
 // calculates the dominance set for every node in the graph.  modifies the
