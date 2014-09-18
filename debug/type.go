@@ -7,6 +7,9 @@ import "encoding/binary"
 import "fmt"
 import "io"
 import "strings"
+import "../msg"
+
+var types = msg.StdChan()
 
 type Type struct {
   offset dwarf.Offset
@@ -116,8 +119,8 @@ func (df dwfLocal) Match(entry *dwarf.Entry) (bool, bool) {
     // if this is a function, but not the one we're looking for, then its whole
     // subtree is junk.  prune it.
     if function(entry) != df.fqn {
-//      fmt.Printf("skipping %s because it's not our target of %s\n",
-//                 function(entry), df.fqn)
+      types.Trace("skipping %s because it's not our target of %s\n",
+                  function(entry), df.fqn)
       return false, false
     }
   }
@@ -139,7 +142,8 @@ func (df dwfLocal) Match(entry *dwarf.Entry) (bool, bool) {
 
 func function(entry *dwarf.Entry) string {
   if entry.Tag != dwarf.TagSubprogram {
-    panic("probably means you're doing something wrong (why call this?)")
+    types.Error("if the type is not Subprogram, you're probably doing %s\n",
+                "something wrong; why call this?")
     return ""
   }
   for _, fld := range entry.Field { // can this just be done with ent.Val.(x)?
@@ -232,12 +236,8 @@ func TypeGlobalVar(program string, address uintptr) (Type, error) {
       return Type{}, err
     }
     if addr != address {
-      /*
-      fmt.Printf("did not find at original place. 0x%0x instead of 0x%0x\n",
-                 addr, address)
-      fmt.Printf("length is: %d, meaning 0x%0x extends to 0x%0x\n", ty.Size(),
-                 addr, addr+uintptr(ty.Size()))
-      */
+      types.Trace("found type for 0x%0x--0x%0x instead of 0x%0x\n",
+                  addr, addr+uintptr(ty.Size()), address)
       if addr+uintptr(ty.Size()) < address { // then it wasn't found.
         return Type{}, io.EOF
       }
@@ -265,12 +265,10 @@ func TypeLocal(program string, fqn string, rel int64) (Type, error) {
     return Type{}, err
   }
 
-  /*
   name, ok := entry.Val(dwarf.AttrName).(string) // del this when FIN'd dbging
   if ok {
-    fmt.Printf("found %s (%d): %v\n", name, rel, ty)
+    types.Trace("found %s (%d): %v\n", name, rel, ty)
   }
-  */
 
   return Type{offset: offs, Type: ty}, nil
 }
