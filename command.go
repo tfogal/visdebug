@@ -1164,55 +1164,6 @@ func (c cdebugvar) Execute(inferior *ptrace.Tracee) error {
   return nil
 }
 
-func type_signed(typ dwarf.Type) bool {
-  switch {
-  case strings.Contains(typ.String(), "float"),
-       strings.Contains(typ.String(), "double"),
-       strings.Contains(typ.String(), "int8_t"),
-       strings.Contains(typ.String(), "int16_t"),
-       strings.Contains(typ.String(), "int32_t"),
-       strings.Contains(typ.String(), "int64_t"):
-    return true
-  case strings.Contains(typ.String(), "size_t"),
-       strings.Contains(typ.String(), "uint8_t"),
-       strings.Contains(typ.String(), "uint16_t"),
-       strings.Contains(typ.String(), "uint32_t"),
-       strings.Contains(typ.String(), "uint64_t"),
-       strings.Contains(typ.String(), "unsigned"):
-    return false
-  default:
-    fmt.Fprintf(os.Stderr, "unknown type: '%v'\n", typ)
-    panic("unknown type")
-  }
-}
-
-func dbg_parameter_signed(fqnname string, offset int64) (bool, error) {
-  legolas, err := elf.Open(globals.program)
-  if err != nil { return false, err }
-  defer legolas.Close()
-
-  gimli, err := legolas.DWARF()
-  if err != nil { return false, err }
-
-  typ, err := dbg_local_type(fqnname, gimli, offset)
-  if err != nil { return false, err }
-  return type_signed(typ), nil
-}
-
-func print_type(entry *dwarf.Entry, rdr *dwarf.Reader) {
-  atype, ok := entry.Val(dwarf.AttrType).(dwarf.Offset)
-  if !ok { return }
-  rdr.Seek(atype)
-  ent, err := rdr.Next()
-  if err != nil { panic(err) }
-
-  fmt.Printf("type: %v\n", ent)
-  for _, f := range ent.Field {
-    fmt.Printf("\t %v\n", f)
-  }
-  print_type(ent, rdr)
-}
-
 // given a type, follows the type chain until it gets to the base type and then
 // returns its name.
 func dbg_base_type(entry *dwarf.Entry) (*dwarf.Entry, error) {
