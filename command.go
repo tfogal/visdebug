@@ -1036,59 +1036,6 @@ func bind_identify(fqn string, node *cfg.Node,
   return dims, nil
 }
 
-// finds the given function in the list of those that dwarf gives.
-func dbg_function(symname string, rdr *dwarf.Reader) (*dwarf.Entry, error) {
-  for ent, err := rdr.Next(); ent != nil && err != io.EOF;
-      ent, err = rdr.Next() {
-    if err != nil { return nil, err }
-    if ent.Tag == dwarf.TagSubprogram {
-      for _, fld := range ent.Field {
-        if fld.Attr == dwarf.AttrName && fld.Val.(string) == symname {
-          return ent, nil
-        } else if fld.Attr == dwarf.AttrName {
-          // minor optimization: if it's a subprogram but not the one we're
-          // looking for, skip all its local variables and the like.
-          rdr.SkipChildren()
-        }
-      }
-    }
-  }
-  return nil, io.EOF
-}
-// reads the type from the given dwarf debug symbol
-func dbg_type(flds []dwarf.Field) (dwarf.CommonType, error) {
-  for _, fld := range flds {
-    if fld.Attr == dwarf.AttrType {
-      return fld.Val.(dwarf.CommonType), nil
-    }
-  }
-  return dwarf.CommonType{}, fmt.Errorf("no type found")
-}
-
-// converts a signed "LEB128" from a byte array into a signed integer.
-// algorithm is modified from the dwarf v4 spec.
-func sleb128(leb []uint8) int64 {
-  result := uint64(0) // go forces unsigned for shifting.  cast later.  sigh.
-  shift := uint(0)
-  const nbits = 64
-  for b := range leb {
-    // 0x91 seems to indicate 'this is a multi-byte thing' as opposed to
-    // actually being used.  Not 100% sure this is correct, but we match
-    // objdump on some test code with this continue.
-    if leb[b] == 0x91 { continue }
-    value := leb[b] & 0x7f
-    result |= uint64(value) << uint64(shift)
-    shift += 7
-    // the DWARF algorithm reads the high-order bit as a sentinel, but instead
-    // of an infinite array the Go API just gives us a correctly-sized slice.
-  }
-  // highest-order bit is the sentinel, so second highest is the sign.
-  if shift < nbits && (leb[len(leb)-1] & 0x40) != 0 {
-    result = result | uint64(int64(-1) << shift) // sign extension.
-  }
-  return int64(result)
-}
-
 // Looks up the type of a global variable in the given program.
 func dbg_gvar_basetype(program string,
                        offset uintptr) (dwarf.Type, error) {
@@ -1189,49 +1136,6 @@ func dbg_base_type(entry *dwarf.Entry) (*dwarf.Entry, error) {
   return dbg_base_type(ent) // recurse.
 }
 
-
-// looks up the type for any 'local' of the given function.  this could be a
-// parameter or a variable.
-// 'param' is assumed to be an offset off of the frame pointer.
-func dbg_local_type(fqn string, dwf *dwarf.Data,
-                    offset int64) (dwarf.Type, error) {
-  rdr := dwf.Reader()
-  entry, err := dbg_function(fqn, rdr)
-  if err != nil { return nil, err }
-  if !entry.Children {
-    return nil, fmt.Errorf("function %v has no children?", entry)
-  }
-  if entry.Tag != dwarf.TagSubprogram {
-    panic("dbg_function didn't find a function?")
-  }
-
-  for ent, err := rdr.Next(); err != io.EOF; ent, err = rdr.Next() {
-    if err == io.EOF {
-      break
-    }
-    if ent == nil && err == nil {
-      break
-    }
-    if ent.Tag == dwarf.TagFormalParameter || ent.Tag == dwarf.TagVariable {
-      val, ok := ent.Val(dwarf.AttrLocation).([]uint8)
-      if !ok {
-        return nil, fmt.Errorf("location is not a byte array")
-      }
-      leb := sleb128(val)
-      if leb == offset {
-        ty, err := dbg_base_type(ent)
-        if err != nil { return nil, err }
-        if ty.Tag != dwarf.TagBaseType { panic("dbg_base_type is buggy") }
-        typ, err := dwf.Type(ty.Offset)
-        if err != nil { return nil, err }
-        return typ, nil
-      }
-    }
-  }
-
-  return nil, fmt.Errorf("offset %d in func %s never found", offset, fqn)
-}
-
 type cdebuginfo struct {
   fqn string
   offset string
@@ -1257,22 +1161,8 @@ func (c cdebuginfo) Execute(inferior *ptrace.Tracee) error {
     return fmt.Errorf("could not find '%s' among the %d known symbols.",
                       c.fqn, len(symbols))
   }
-  legolas, err := elf.Open(globals.program)
-  if err != nil { return err }
-  defer legolas.Close()
 
-  gimli, err := legolas.DWARF()
-  if err != nil { return err }
-
-  rdr := gimli.Reader()
-  fqn, err := dbg_function(c.fqn, rdr)
-  if err != nil { return err }
-  fmt.Printf("ent: %v\n", fqn)
-
-  if offset == 0 {
-    return nil
-  }
-  typ, err := dbg_local_type(c.fqn, gimli, offset)
+  typ, err := debug.TypeLocal(globals.program, c.fqn, offset)
   if err != nil { return err }
   fmt.Printf("type: %v\n", typ)
 
