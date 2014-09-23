@@ -79,18 +79,25 @@ func WaitUntil(inferior *ptrace.Tracee, address uintptr) error {
   }
   stat := <- inferior.Events()
   status := stat.(syscall.WaitStatus)
+
+  // if it exited, we can't unset the breakpoint or do anything, really; just
+  // bail now.
+  if status.Exited() || status.StopSignal() == syscall.SIGCHLD {
+    return io.EOF
+  }
+  // remove the breakpoint to leave our inferior in a consistent state, even if
+  // it just had something crazy happen (i.e. crashing, signal, etc.)
+  err = Unbreak(inferior, bp)
+  if err != nil {
+    return fmt.Errorf("could not unset bp: %v", err)
+  }
+
   // maybe it didn't get hit at all?  program could have ended.
   switch {
-  case status.Exited() || status.StopSignal() == syscall.SIGCHLD:
-    return io.EOF
   case status.CoreDump(): return errors.New("abnormal termination, core dumped")
   case status.StopSignal() == syscall.SIGSEGV:
     // A segfault might be expected: we could have caused it with our
     // malloc-rewrite-mprotect scheme.
-    err = Unbreak(inferior, bp)
-    if err != nil {
-      return fmt.Errorf("unsetting BP while in segfault failed: %v\n", err)
-    }
     return ErrSegFault
   case status.StopSignal() != syscall.SIGTRAP:
     addr, err := inferior.GetIPtr()
@@ -101,14 +108,9 @@ func WaitUntil(inferior *ptrace.Tracee, address uintptr) error {
     return fmt.Errorf("unexpected signal %d @ 0x%0x", status.StopSignal(), addr)
   }
 
-  // back up the instruction pointer so the break'd call will now execute.
+  // back up the instruction pointer so the break'd insn will now execute.
   if err := Stepback(inferior) ; err != nil {
     return fmt.Errorf("error backing up insn ptr: %v", err)
-  }
-
-  err = Unbreak(inferior, bp)
-  if err != nil {
-    return fmt.Errorf("could not unset bp: %v", err)
   }
 
   iptr, err := inferior.GetIPtr()
