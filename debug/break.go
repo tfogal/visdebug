@@ -63,6 +63,10 @@ func Stepback(inferior *ptrace.Tracee) error {
   return nil
 }
 
+var(
+  ErrSegFault = errors.New("SIGSEGV")
+)
+
 func WaitUntil(inferior *ptrace.Tracee, address uintptr) error {
   bp, err := Break(inferior, address)
   if err != nil {
@@ -80,6 +84,14 @@ func WaitUntil(inferior *ptrace.Tracee, address uintptr) error {
   case status.Exited() || status.StopSignal() == syscall.SIGCHLD:
     return io.EOF
   case status.CoreDump(): return errors.New("abnormal termination, core dumped")
+  case status.StopSignal() == syscall.SIGSEGV:
+    // A segfault might be expected: we could have caused it with our
+    // malloc-rewrite-mprotect scheme.
+    err = Unbreak(inferior, bp)
+    if err != nil {
+      return fmt.Errorf("unsetting BP while in segfault failed: %v\n", err)
+    }
+    return ErrSegFault
   case status.StopSignal() != syscall.SIGTRAP:
     addr, err := inferior.GetIPtr()
     if err != nil {
