@@ -7,7 +7,7 @@ import "syscall"
 import "github.com/tfogal/ptrace"
 
 type Breakpoint struct {
-  address uintptr // where it was inserted
+  Address uintptr // where it was inserted
   insn uint64 // the instruction before we clobbered it with a BP
 }
 
@@ -17,7 +17,7 @@ const imask = 0xffffffffffffff00
 // Inserts a breakpoint at the given address.  You'll need the return value to
 // remove the breakpoint.
 func Break(inferior *ptrace.Tracee, address uintptr) (Breakpoint, error) {
-  bp := Breakpoint{address: address, insn: 0x0}
+  bp := Breakpoint{Address: address, insn: 0x0}
 
   var err error
   // a breakpoint is just 0xcc at the given address.  But we can only
@@ -37,7 +37,7 @@ func Break(inferior *ptrace.Tracee, address uintptr) (Breakpoint, error) {
 // Removes the given breakpoint.
 func Unbreak(inferior *ptrace.Tracee, bp Breakpoint) error {
   // restore the correct instruction ...
-  insn, err := inferior.ReadWord(bp.address)
+  insn, err := inferior.ReadWord(bp.Address)
   if err != nil { return err }
 
   // Make sure the breakpoint actually matches what's there now.  This might
@@ -46,7 +46,7 @@ func Unbreak(inferior *ptrace.Tracee, bp Breakpoint) error {
     return fmt.Errorf("instruction doesn't match. memory changed or SMC?")
   }
 
-  err = inferior.WriteWord(bp.address, (insn & imask) | (bp.insn & 0xFF))
+  err = inferior.WriteWord(bp.Address, (insn & imask) | (bp.insn & 0xFF))
   if err != nil { return fmt.Errorf("could not restore insn: %v", err) }
 
   return nil
@@ -85,6 +85,7 @@ func WaitUntil(inferior *ptrace.Tracee, address uintptr) error {
   if status.Exited() || status.StopSignal() == syscall.SIGCHLD {
     return io.EOF
   }
+
   // remove the breakpoint to leave our inferior in a consistent state, even if
   // it just had something crazy happen (i.e. crashing, signal, etc.)
   err = Unbreak(inferior, bp)

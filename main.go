@@ -410,6 +410,9 @@ type allocation struct {
 // some convenience accessors because we care about the range so often.
 func (a allocation) begin() uintptr { return a.base }
 func (a allocation) end() uintptr { return a.base+uintptr(a.length) }
+func (a allocation) String() string {
+  return fmt.Sprintf("alloc(%d) -> 0x%08x", a.length, a.base)
+}
 
 func find_alloc(allocs []allocation, addr uintptr) (allocation, error) {
   for _, alc := range allocs {
@@ -418,6 +421,65 @@ func find_alloc(allocs []allocation, addr uintptr) (allocation, error) {
     }
   }
   return allocation{}, fmt.Errorf("allocation 0x%0x not found", addr)
+}
+
+// Inserts a breakpoint at the exit to the current function.
+func breakexit(inferior *ptrace.Tracee) (debug.Breakpoint, error) {
+  var stk x86_64
+  retsite := stk.RetAddr(inferior)
+
+  bp, err := debug.Break(inferior, retsite)
+  if err != nil {
+    return debug.Breakpoint{}, err
+  }
+
+  return bp, nil
+}
+
+// an inferior event is some 'asynchronous' action that happens in the inferior.
+type ievent interface {}
+
+type trap struct {
+  iptr uintptr
+}
+type segfault struct {
+  addr uintptr
+}
+
+// tries to make inferior/event handling synchronous.  continuously runs
+// inferior.Continue,
+func ihandle(inferior *ptrace.Tracee) (ievent, error) {
+  if err := inferior.Continue() ; err != nil {
+    return nil, err
+  }
+  stat := <- inferior.Events()
+  status := stat.(syscall.WaitStatus)
+  if status.Exited() || status.StopSignal() == syscall.SIGCHLD {
+    return nil, io.EOF
+  }
+
+  switch {
+  case status.StopSignal() == syscall.SIGSEGV:
+    sig, err := inferior.GetSiginfo()
+    if err != nil {
+      return nil, err
+    }
+    return segfault{addr: sig.Addr}, nil
+  case status.StopSignal() == syscall.SIGTRAP:
+    // back up once so the trap iptr makes sense and we can restart our insn
+    if err := debug.Stepback(inferior) ; err != nil {
+      return nil, err
+    }
+    ptr, err := inferior.GetIPtr()
+    if err != nil {
+      return nil, fmt.Errorf("signal %d and could not get iptr.",
+                             status.StopSignal())
+    }
+    return trap{iptr: ptr}, nil
+  case status.CoreDump():
+    return nil, errors.New("abnormal termination (core dumped)")
+  }
+  return status, errors.New("unknown case!")
 }
 
 // runs a program, replacing every 'malloc' in a program with
@@ -451,63 +513,80 @@ func mallocs(argv []string) {
     return
   }
 
+  // start by inserting a bp for malloc.
+  mallocbp, err := debug.Break(inferior, symmalloc.Address())
+  if err != nil {
+    log.Fatalf("could not insert initial 'malloc' breakpoint: %v\n", err)
+  }
+
+  var retbp debug.Breakpoint
+
+  var alc allocation
   allocs := make([]allocation, 0)
-  var stk x86_64
   for {
-    fmt.Printf("[go] waiting for malloc at 0x%0x\n", symmalloc.Address())
-    err = debug.WaitUntil(inferior, symmalloc.Address())
+    ievent, err := ihandle(inferior)
     if err == io.EOF {
       break
-    } else if err == debug.ErrSegFault {
-      sigi, err := inferior.GetSiginfo()
-      if err != nil {
-        fmt.Fprintf(os.Stderr, "[go] error getting siginfo: %v\n", err)
-        return
+    } else if err != nil {
+      log.Fatalf("ihandle event: %v\n", err)
+    }
+    switch iev := ievent.(type) {
+    case trap:
+      var stk x86_64
+      // but what did we hit?
+      if iev.iptr == symmalloc.Address() { // hit malloc.
+        // record the size of the alloc.
+        alc.length = uint(stk.Arg1(inferior))
+
+        // remove the BP
+        if err := debug.Unbreak(inferior, mallocbp) ; err != nil {
+          log.Fatalf("could not remove malloc BP: %v\n", err)
+        }
+
+        if err := inferior.SetIPtr(tjfmalloc); err != nil {
+          log.Fatalf("jumping to tjfmalloc: %v\n", err)
+        }
+
+        // insert a breakpoint at the retval so we can record the return value
+        retbp, err = breakexit(inferior)
+        if err != nil {
+          log.Fatalf("inserting breakpoint for malloc return site: %v\n", err)
+        }
+      } else if iev.iptr == retbp.Address { // coming back from a malloc.
+        alc.base = uintptr(stk.RetVal(inferior))
+        fmt.Printf("%v\n", alc)
+        allocs = append(allocs, alc)
+
+        // remove the BP.
+        if err := debug.Unbreak(inferior, retbp) ; err != nil {
+          log.Fatalf("could not remove malloc-ret BP: %v\n", err)
+        }
+
+        // re-insert the malloc breakpoint.
+        mallocbp, err = debug.Break(inferior, symmalloc.Address())
+        if err != nil {
+          log.Fatalf("could not re-insert malloc bp: %v\n", err)
+        }
       }
-      fmt.Printf("[go] process %d segfaulted (%d) at address 0x%0x ",
-                 inferior.PID(), sigi.Signo, sigi.Addr)
-      fmt.Printf("(errno=%d, code=%d, trapno=%d)\n", sigi.Errno, sigi.Code,
-                 sigi.Trapno)
-      alc, err := find_alloc(allocs, sigi.Addr)
-      if err != nil { // then it was just a normal segfault.  die.
-        break
+    case segfault:
+      var stk x86_64
+      alc, err := find_alloc(allocs, iev.addr)
+      if err != nil {
+        log.Fatalf("inferior SIGSEGV'd at: 0x%0x\n", iev.addr)
       }
       fmt.Printf("[go] accessed allocation 0x%0x--0x%0x (0x%0x)\n", alc.begin(),
-                 alc.end(), sigi.Addr)
+                 alc.end(), iev.addr)
       retsite := stk.RetAddr(inferior)
-      fmt.Printf("[go] will allow it and then return to 0x%0x\n", retsite)
+      fmt.Printf("[go] will allow it and then return to 0x%0x.\n", retsite)
       if err := inferior.ClearSignal() ; err != nil {
         log.Fatalf("could not clear segv: %v\n", err)
       }
       if err := allow(inferior, alc.base, alc.length, retsite) ; err != nil {
         log.Fatalf("could not allow 0x%0x\n", alc.base)
       }
-      continue
-    } else if err != nil {
-      fmt.Fprintf(os.Stderr, "[go] application exited abnormally: %v\n", err)
-      break
+    default:
+      log.Fatalf("unhandled event type: %v\n", iev)
     }
-    // At this point, we hit 'malloc'.  Let's examine the registers/stack to
-    // figure out how many bytes were given to malloc, as well as where malloc
-    // is going to return to.
-    nbytes := stk.Arg1(inferior)
-    retsite := stk.RetAddr(inferior)
-
-    // instead of letting it run, 'jump' to tjfmalloc.
-    if err := inferior.SetIPtr(tjfmalloc) ; err != nil {
-      log.Fatalf("could not reset iptr when replacing alloc: %v\n", err)
-      return
-    }
-    // now let it go, but stop when we come back from the function.
-    if err := debug.WaitUntil(inferior, retsite) ; err != nil {
-      log.Fatalf("waiting for tjfmalloc to complete: %v\n", err)
-      return
-    }
-    rval := stk.RetVal(inferior)
-    alc := allocation{base: uintptr(rval), length: uint(nbytes)}
-    allocs = append(allocs, alc)
-    fmt.Printf("[go] malloc(%4d) -> 0x%08x--0x%08x\n", alc.length, alc.base,
-               alc.base+uintptr(alc.length))
   }
   fmt.Printf("[go] inferior (%d) terminated.\n", inferior.PID())
 }
