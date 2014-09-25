@@ -23,13 +23,17 @@ func Break(inferior *ptrace.Tracee, address uintptr) (Breakpoint, error) {
   // a breakpoint is just 0xcc at the given address.  But we can only
   // read/write from the process in units of a word, so we mask it.
   bp.insn, err = inferior.ReadWord(address)
-  if err != nil { return Breakpoint{}, err }
+  if err != nil {
+    return Breakpoint{}, fmt.Errorf("reading 0x%0x: %v", address, err)
+  }
 
   bpinsn := (bp.insn & imask) | 0xcc // 0xcc is "the" breakpoint opcode.
 
   // overwrite with breakpoint (0xcc)
   err = inferior.WriteWord(address, bpinsn)
-  if err != nil { return Breakpoint{}, err }
+  if err != nil {
+    return Breakpoint{}, fmt.Errorf("replacing 0x%0x: %v", address, err)
+  }
 
   return bp, nil
 }

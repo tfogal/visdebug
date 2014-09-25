@@ -390,10 +390,59 @@ func allow(inferior *ptrace.Tracee, addr uintptr, len uint,
   }
   // We hacked our stack to return to rettarget; wait until that happens.
   if err := debug.WaitUntil(inferior, rettarget) ; err != nil {
-    return fmt.Errorf("did not return to to target: %v", err)
+    return fmt.Errorf("did not return to target 0x%0x: %v", rettarget, err)
   }
 
   fmt.Printf("[go] Allowed 0x%0x. ", addr)
+  // I'm so hilarious:
+  fmt.Println("Now back to your regularly scheduled programming.")
+  if err := inferior.SetRegs(orig_regs) ; err != nil { // restore registers.
+    return err
+  }
+  return nil
+}
+
+// Forces the inferior to PROT_READ a given chunk of memory.
+// RETTARGET is where you'd like the inferior to return to.
+func deny(inferior *ptrace.Tracee, addr uintptr, len uint,
+          rettarget uintptr) error {
+  symbols, err := bfd.SymbolsProcess(inferior)
+  if err != nil {
+    return err
+  }
+  mprotect := symbol("mprotect", symbols)
+  if mprotect == nil {
+    return errors.New("'mprotect' not in symbol list!")
+  }
+
+  regs, err := inferior.GetRegs()
+  if err != nil {
+    return err
+  }
+  orig_regs := regs // copy registers.
+
+  regs.Rdi = uint64(addr)
+  regs.Rsi = uint64(len)
+  regs.Rdx = 0x1 // prot, i.e. PROT_READ
+  regs.Rip = uint64(mprotect.Address())
+
+  // The 'ret' insruction reads *%rsp and jumps back to that.  So fill *%rsp
+  // with whereever the user wanted to jump back to.
+  err = inferior.WriteWord(uintptr(regs.Rsp), uint64(rettarget))
+  if err != nil {
+    return fmt.Errorf("could not replace *%rsp with rettarget's addr: %v", err)
+  }
+
+  // Okay, now setup our registers for the mprotect arguments and jump there.
+  if err := inferior.SetRegs(regs) ; err != nil {
+    return err
+  }
+  // We hacked our stack to return to rettarget; wait until that happens.
+  if err := debug.WaitUntil(inferior, rettarget) ; err != nil {
+    return fmt.Errorf("did not return to target 0x%0x: %v", rettarget, err)
+  }
+
+  fmt.Printf("[go] Denied Wr to 0x%0x. ", addr)
   // I'm so hilarious:
   fmt.Println("Now back to your regularly scheduled programming.")
   if err := inferior.SetRegs(orig_regs) ; err != nil { // restore registers.
@@ -519,7 +568,12 @@ func mallocs(argv []string) {
     log.Fatalf("could not insert initial 'malloc' breakpoint: %v\n", err)
   }
 
-  var retbp debug.Breakpoint
+  var retbp debug.Breakpoint // breakpoint for where/when malloc returns
+  type maccess struct { // keeping track of an access we have allowed, will deny
+    bp debug.Breakpoint
+    alloc allocation
+  }
+  var access maccess
 
   var alc allocation
   allocs := make([]allocation, 0)
@@ -567,6 +621,17 @@ func mallocs(argv []string) {
         if err != nil {
           log.Fatalf("could not re-insert malloc bp: %v\n", err)
         }
+      } else if iev.iptr == access.bp.Address { // coming back from 'allow'
+        if err := debug.Unbreak(inferior, access.bp) ; err != nil {
+          log.Fatalf("could not remove access BP: %v\n", err)
+        }
+
+        rs := stk.RetAddr(inferior)
+        fmt.Printf("deny: would return to 0x%0x, now: 0x%0x\n", rs, iev.iptr)
+        err := deny(inferior, access.alloc.base, access.alloc.length, iev.iptr)
+        if err != nil {
+          log.Fatalf("could not revoke perms for: %v\n", err)
+        }
       }
     case segfault:
       var stk x86_64
@@ -582,8 +647,15 @@ func mallocs(argv []string) {
         log.Fatalf("could not clear segv: %v\n", err)
       }
       if err := allow(inferior, alc.base, alc.length, retsite) ; err != nil {
-        log.Fatalf("could not allow 0x%0x\n", alc.base)
+        log.Fatalf("could not allow 0x%0x: %v\n", alc.base, err)
       }
+      access.alloc = alc
+
+      // todo/fixme: now we have to find the exit point of the function and
+      // insert a breakpoint, which we copy into access.bp, so that we can
+      // re-enable the RO nature of the memory and thus detect the *next*
+      // access.
+
     default:
       log.Fatalf("unhandled event type: %v\n", iev)
     }
