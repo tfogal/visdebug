@@ -5,7 +5,10 @@ FFLAGS:=-Wall -Wextra -gdwarf-3 -fPIC
 obj:=3dloop.o vardim.o switch.o bcont.o nested.o loops.o waitfor.o \
   tiny.o use.o smooth3d.o stack.o indirect.o
 all: $(obj) 3dloop dimensional branching contbreak nest forloops pauser s3d \
-  checkstack indirect handle
+  checkstack indirect handle relax
+
+relax: heat.o
+	$(CC) $(CFLAGS) $^ -o $@ $(LDLIBS)
 
 handle: handler.o
 	$(CC) $(CFLAGS) $^ -o $@ $(LDLIBS)
