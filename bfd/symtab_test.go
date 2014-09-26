@@ -158,3 +158,24 @@ func BenchmarkSymbols(b *testing.B) {
   if err != nil { b.Fatalf("error loading symbols: %v\n", err) }
   garbage = sym
 }
+
+func BenchmarkSymbolsProcess(t *testing.B) {
+  argv := []string{"../testprograms/dimensional", "3"}
+  inferior, err := ptrace.Exec(argv[0], argv)
+  if err != nil {
+    t.Fatalf("could not start subprocess, bailing: %v", err)
+  }
+  defer inferior.Close()
+
+  // wait for 1 event, i.e. the notification that the child has exec'd
+  status := <- inferior.Events()
+  if status == nil {
+    t.Fatalf("no events?")
+  }
+  // wait until main so that the dynamic loader can run.
+  assert(addr_main(argv[0]) != 0x0)
+  debug.WaitUntil(inferior, addr_main(argv[0]))
+
+  SymbolsProcess(inferior)
+  inferior.SendSignal(syscall.SIGKILL)
+}
