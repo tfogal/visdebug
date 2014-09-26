@@ -468,15 +468,10 @@ main(int argc, char *argv[]) {
     return EXIT_FAILURE;
   }
   /* make our child run for a bit.
-  makes sure it gets through
-   * loading, so the addresses we read are valid. */
-  if(ptrace(PTRACE_SYSCALL, child, 0, 0) != 0) {
-    perror("running until syscall");
-    kill(child, SIGKILL);
-    return EXIT_FAILURE;
-  }
-
+   * makes sure it gets through loading,
+   * so the addresses we read are valid. */
   skip_until_main(child);
+  /* now we can read addresses. */
   read_process_elf(child);
   printf("okay, we're done.  detach the child now.\n"); fflush(stdout);
 #if 0

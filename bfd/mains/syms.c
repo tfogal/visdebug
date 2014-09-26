@@ -45,7 +45,7 @@ handle_signal(int sig) {
 static int
 wait_inferior(pid_t inf, int sigexpect) {
   int wstat;
-  printf("waiting for %d...\n", sigexpect);
+  printf("%ld waiting for %d...\n", (long)inf, sigexpect);
   do {
     const pid_t sub = waitpid(inf, &wstat, WCONTINUED);
     if(sub < 0) {
