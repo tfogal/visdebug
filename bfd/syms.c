@@ -573,13 +573,18 @@ lmap_head(pid_t inferior, uintptr_t addr_dynamic) {
 MALLOC struct link_map*
 load_lmap(pid_t inferior, uintptr_t laddr) {
   struct link_map* rv = calloc(1, sizeof(struct link_map));
+  if(rv == NULL) {
+    fprintf(stderr, "allocation error.\n");
+    return NULL;
+  }
   errno=0;
   if(read_inferior(&rv->l_addr, laddr, sizeof(Elf64_Addr), inferior)) {
     fprintf(stderr, "error reading library addr: %d\n", errno);
   }
   if(read_inferior(&rv->l_name, laddr+offsetof(struct link_map,l_name),
                    sizeof(char*), inferior)) {
-    fprintf(stderr, "error reading addr of library name: %d\n", errno);
+    fprintf(stderr, "error reading addr (0x%0lx) of library name: %d\n",
+            laddr+offsetof(struct link_map, l_name), errno);
   }
   if(read_inferior(&rv->l_ld, laddr+offsetof(struct link_map,l_ld),
                    sizeof(Elf64_Dyn*), inferior)) {
