@@ -313,16 +313,19 @@ func SymbolsProcess(inferior *ptrace.Tracee) ([]Symbol, error) {
 
   for {
     lmap := C.load_lmap(C.pid_t(inferior.PID()), C.uintptr_t(lmap_addr))
-    defer C.free(unsafe.Pointer(lmap))
     libname := C.GoString(lmap.l_name)
-    C.free(unsafe.Pointer(lmap.l_name))
+    defer C.free_lmap(lmap)
     fmt.Fprintf(strm, "Library loaded at 0x%012x, next at %p [%s]\n",
                 lmap.l_addr, lmap.l_next, libname)
     lmap_addr = uintptr(C.uintptr(unsafe.Pointer(lmap.l_next))) // next round.
+    if libname == "" { // skip empty libraries; no symbols we care about there
+      continue
+    }
 
     fp, err := os.Open(libname)
-    // skip the 'in memory image only' kind of library.
-    if libname == "" || err != nil { continue }
+    if err != nil { // maybe happens with debug libraries that arent installed?
+      continue
+    }
     defer fp.Close()
     libsym, err := read_symbols_file(fp)
     if err != nil { panic(err) }
