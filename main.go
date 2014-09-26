@@ -353,10 +353,19 @@ func setup_unprotect(inferior *ptrace.Tracee) (uintptr, error) {
   return addr, nil
 }
 
-// This forces the inferior to PROT_READ|PROT_WRITE the given chunk of memory.
-// RETTARGET is where you'd like the inferior to return to.
-func allow(inferior *ptrace.Tracee, addr uintptr, len uint,
-           rettarget uintptr) error {
+const (
+  PROT_NONE = 0x0
+  PROT_READ = 0x1
+  PROT_WRITE = 0x2
+  PROT_EXEC = 0x4
+)
+
+// like 'mprotect', but changes the inferior's memory protections, not ours.
+// ADDR, LEN, and PROT are the arguments to mprotect.  This function makes the
+// inferior run some code; RETTARGET is where it jumps back to when done.  If
+// you only care for the side effect, use the current instruction ptr.
+func iprotect(inferior *ptrace.Tracee, addr uintptr, len uint,
+              prot uint64, rettarget uintptr) error {
   symbols, err := bfd.SymbolsProcess(inferior)
   if err != nil {
     return err
@@ -374,81 +383,74 @@ func allow(inferior *ptrace.Tracee, addr uintptr, len uint,
 
   regs.Rdi = uint64(addr)
   regs.Rsi = uint64(len)
-  regs.Rdx = 0x3 // prot, i.e. PROT_READ | PROT_WRITE
+  regs.Rdx = prot
   regs.Rip = uint64(mprotect.Address())
 
-  // The 'ret' insruction reads *%rsp and jumps back to that.  So fill *%rsp
-  // with whereever the user wanted to jump back to.
+  // 'ret' on x86_64 reads *%rsp and jumps to that.  The easiest solution to
+  // control execution, then, is to fill *%rsp with where our caller wants the
+  // inferior to jump back to.
+  // But we don't just want to hack "arbitrary" memory locations in the
+  // inferior.  Save what's there now so that we can restore it when we're done.
+
+  oretaddr, err := inferior.ReadWord(uintptr(regs.Rsp))
+  if err != nil {
+    return fmt.Errorf("could not save retaddr: %v\n", err)
+  }
+  fmt.Printf("orig *%%rsp: 0x%x\n", oretaddr)
+
+  // now we can fill in our custom return address.
   err = inferior.WriteWord(uintptr(regs.Rsp), uint64(rettarget))
   if err != nil {
-    return fmt.Errorf("could not replace *%rsp with rettarget's addr: %v", err)
+    return fmt.Errorf("could not replace *%%rsp with rettarget's addr: %v", err)
   }
 
-  // Okay, now setup our registers for the mprotect arguments and jump there.
+  // Okay, now setup our registers for the mprotect arguments, + jump there.
   if err := inferior.SetRegs(regs) ; err != nil {
     return err
   }
+
   // We hacked our stack to return to rettarget; wait until that happens.
   if err := debug.WaitUntil(inferior, rettarget) ; err != nil {
+    // A segfault is a pretty common error if you've mucked something up, like
+    // given a terrible return address or something.  Try to give more info in
+    // that case, it's really useful when debugging things like this.
+    if err == debug.ErrSegFault {
+      sig, err := inferior.GetSiginfo()
+      if err != nil {
+        return fmt.Errorf("error getting segfault reason: %v\n", err)
+      }
+      return fmt.Errorf("segfault@0x%x \n", sig.Addr)
+    }
     return fmt.Errorf("did not return to target 0x%0x: %v", rettarget, err)
   }
 
-  fmt.Printf("[go] Allowed 0x%0x. ", addr)
+  fmt.Printf("[go] %d on 0x%0x. ", prot, addr)
   // I'm so hilarious:
   fmt.Println("Now back to your regularly scheduled programming.")
   if err := inferior.SetRegs(orig_regs) ; err != nil { // restore registers.
     return err
   }
+  fmt.Printf("[go] restoring: 0x%x -> 0x%x @ 0x%x\n", rettarget, oretaddr,
+             uintptr(orig_regs.Rsp))
+  if err := inferior.WriteWord(uintptr(orig_regs.Rsp), oretaddr) ; err != nil {
+
+    return err
+  }
   return nil
+}
+
+// This forces the inferior to PROT_READ|PROT_WRITE the given chunk of memory.
+// RETTARGET is where you'd like the inferior to return to.
+func allow(inferior *ptrace.Tracee, addr uintptr, len uint,
+           rettarget uintptr) error {
+  return iprotect(inferior, addr, len, PROT_READ|PROT_WRITE, rettarget)
 }
 
 // Forces the inferior to PROT_READ a given chunk of memory.
 // RETTARGET is where you'd like the inferior to return to.
 func deny(inferior *ptrace.Tracee, addr uintptr, len uint,
           rettarget uintptr) error {
-  symbols, err := bfd.SymbolsProcess(inferior)
-  if err != nil {
-    return err
-  }
-  mprotect := symbol("mprotect", symbols)
-  if mprotect == nil {
-    return errors.New("'mprotect' not in symbol list!")
-  }
-
-  regs, err := inferior.GetRegs()
-  if err != nil {
-    return err
-  }
-  orig_regs := regs // copy registers.
-
-  regs.Rdi = uint64(addr)
-  regs.Rsi = uint64(len)
-  regs.Rdx = 0x1 // prot, i.e. PROT_READ
-  regs.Rip = uint64(mprotect.Address())
-
-  // The 'ret' insruction reads *%rsp and jumps back to that.  So fill *%rsp
-  // with whereever the user wanted to jump back to.
-  err = inferior.WriteWord(uintptr(regs.Rsp), uint64(rettarget))
-  if err != nil {
-    return fmt.Errorf("could not replace *%rsp with rettarget's addr: %v", err)
-  }
-
-  // Okay, now setup our registers for the mprotect arguments and jump there.
-  if err := inferior.SetRegs(regs) ; err != nil {
-    return err
-  }
-  // We hacked our stack to return to rettarget; wait until that happens.
-  if err := debug.WaitUntil(inferior, rettarget) ; err != nil {
-    return fmt.Errorf("did not return to target 0x%0x: %v", rettarget, err)
-  }
-
-  fmt.Printf("[go] Denied Wr to 0x%0x. ", addr)
-  // I'm so hilarious:
-  fmt.Println("Now back to your regularly scheduled programming.")
-  if err := inferior.SetRegs(orig_regs) ; err != nil { // restore registers.
-    return err
-  }
-  return nil
+  return iprotect(inferior, addr, len, PROT_READ, rettarget)
 }
 
 // An allocation that the inferior has performed.

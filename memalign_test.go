@@ -1,5 +1,6 @@
 package main
 import "fmt"
+import "syscall"
 import "testing"
 import "./bfd"
 import "./debug"
@@ -127,4 +128,42 @@ func TestExecFill(t *testing.T) {
     t.Fatalf("could not continue: %v", err)
   }
   <- inferior.Events() // let it go.
+}
+
+func TestAllowDeny(t *testing.T) {
+  argv := []string{"testprograms/dimensional", "3"}
+  inferior, err := startup(argv)
+  if err != nil {
+    t.Fatalf("startup failed: %v", err)
+  }
+  defer inferior.Close()
+
+  iptr, err := inferior.GetIPtr()
+  if err != nil {
+    t.Fatalf("could not get current insn ptr: %v\n", err)
+  }
+  fmt.Printf("retsite will be: 0x%0x\n", iptr)
+  alc := allocation{base: 0x401000, length: 4096}
+  err = allow(inferior, alc.base, alc.length, iptr)
+  if err != nil {
+    t.Fatalf("allow1: %v\n", err)
+  }
+  err = deny(inferior, alc.base, alc.length, iptr)
+  if err != nil {
+    t.Fatalf("allow1: %v\n", err)
+  }
+  err = iprotect(inferior, alc.base, alc.length, PROT_EXEC, iptr)
+  if err != nil {
+    t.Fatalf("allow1: %v\n", err)
+  }
+
+  if err := inferior.Continue() ; err != nil {
+    t.Fatalf("continued exec: %v\n", err)
+  }
+
+  stat := <- inferior.Events()
+  status := stat.(syscall.WaitStatus)
+  if !status.Exited() {
+    t.Fatalf("bad exit: %v\n", status)
+  }
 }
