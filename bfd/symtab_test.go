@@ -21,13 +21,12 @@ func TestSymbolsProcess(t *testing.T) {
     t.Fatalf("could not start subprocess, bailing: %v", err)
     t.FailNow()
   }
+  defer inferior.Close()
 
   // wait for 1 event, i.e. the notification that the child has exec'd
   status := <- inferior.Events()
   if status == nil {
     t.Fatalf("no events?")
-    inferior.Close()
-    return
   }
   // wait until main so that the dynamic loader can run.
   assert(addr_main(argv[0]) != 0x0)
@@ -45,13 +44,12 @@ func TestAttach(t *testing.T) {
   if err != nil {
     t.Skipf("could not attach (%v), can't run test.", err)
   }
+  defer inferior.Close()
   t.Logf("inferior PID %d attached.\n", inferior.PID())
   /* wait for 1 event, i.e. the notification of the attach */
   status := <- inferior.Events()
   if status == nil {
     t.Fatalf("no events?")
-    inferior.Close()
-    return
   }
 
   SymbolsProcess(inferior)
@@ -102,14 +100,12 @@ func TestMallocInterrupt(t *testing.T) {
   inferior, err := ptrace.Exec(argv[0], argv)
   if err != nil {
     t.Fatalf("could not start subprocess, bailing: %v", err)
-    t.FailNow()
   }
+  defer inferior.Close()
   // wait for 1 event, i.e. the notification that the child has exec'd
   status := <- inferior.Events()
   if status == nil {
     t.Fatalf("no events?")
-    inferior.Close()
-    return
   }
 
   // pause the process until we get to 'main'.  This lets the process run
