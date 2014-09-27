@@ -484,6 +484,7 @@ read_symtab(rdinf* rd) {
       free(elfsyms);
     }
   }
+  assert(sym);
   return sym;
 }
 /* purely because Cgo is a PITA. */

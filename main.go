@@ -253,9 +253,10 @@ func (x86_64) Arg1(inferior *ptrace.Tracee) uint64 {
 // in the x86-64 ABI, calling a function places the return address on the
 // stack, and the RSP register points to that stack location.  So, essentially,
 // *RSP is the return address.
-// If we're in the "root" or entry function, then this function makes no sense
-// and will likely return garbage.
-func (x86_64) RetAddr(inferior *ptrace.Tracee) uintptr {
+// Note this is only valid *immediately* after the call: the code will very
+// shortly afterwards muck with the stack (usually as the first instruction of
+// the fqn).
+func (x86_64) RetAddrTop(inferior *ptrace.Tracee) uintptr {
   regs, err := inferior.GetRegs()
   if err != nil { log.Fatalf(err.Error()) }
 
@@ -264,6 +265,53 @@ func (x86_64) RetAddr(inferior *ptrace.Tracee) uintptr {
 
   return uintptr(retaddr)
 }
+
+// Gets the return address when we are in the middle of a function.  The normal
+// 'RetAddr' is only valid at the very start of a function (i.e. after it has
+// been 'call'ed but before it does anything to its stack.
+// Ouch.  We need to rename/reorganize this.
+func (x86_64) RetAddrMid(inferior *ptrace.Tracee) uintptr {
+  regs, err := inferior.GetRegs()
+  if err != nil {
+    log.Fatalf("could not get regs in middle of fqn: %v\n", err)
+  }
+  retaddr, err := inferior.ReadWord(uintptr(regs.Rbp+8))
+  if err != nil {
+    log.Fatalf("could not read 0x%0x: %v\n", uintptr(regs.Rbp+8), err)
+  }
+  return uintptr(retaddr)
+}
+
+// This is complicated because x86_64 hates people.  At some arbitrary place
+// inside the function, the return address is stored at [%rbp+8].  However, if
+// we've just entered the function, the frame pointer isn't yet setup, so the
+// return address is at [%rsp].
+// We differentiate between the two by looking at the current instruction: if
+// it's 'push %rbp', then we're at the top of the function; at no other place
+// does that instruction make sense.  Otherwise, we assume that the frame
+// pointer is valid and use that.  Note this logic is invalid for the small bit
+// of code that is a function prologue/epilogue.  i.e. this will work if the
+// current iptr is before or after the prologue, but not if we're *in* the
+// prologue!
+func (asm x86_64) RetAddr(inferior *ptrace.Tracee) uintptr {
+  iptr, err := inferior.GetIPtr()
+  if err != nil {
+    log.Fatalf("grabbing insn ptr: %v\n", err)
+  }
+  insn := make([]byte, 1)
+  if err := inferior.Read(iptr, insn) ; err != nil {
+    log.Fatalf("could not read current (0x%x) instruction: %v\n", iptr, err)
+  }
+  // yes, I do this so much that I know cold turkey that 0x55 is the machine
+  // code for the "push %rbp" mnemonic.
+  // Likewise, 0xc3 is the mnemonic for "ret"
+  if 0x55 == insn[0] || 0xc3 == insn[0] {
+    return asm.RetAddrTop(inferior)
+  }
+  return asm.RetAddrMid(inferior)
+}
+
+
 // the x86-64 ABI places the return value in RAX.
 func (x86_64) RetVal(inferior *ptrace.Tracee) uint64 {
   regs, err := inferior.GetRegs()
@@ -391,12 +439,10 @@ func iprotect(inferior *ptrace.Tracee, addr uintptr, len uint,
   // inferior to jump back to.
   // But we don't just want to hack "arbitrary" memory locations in the
   // inferior.  Save what's there now so that we can restore it when we're done.
-
   oretaddr, err := inferior.ReadWord(uintptr(regs.Rsp))
   if err != nil {
     return fmt.Errorf("could not save retaddr: %v\n", err)
   }
-  fmt.Printf("orig *%%rsp: 0x%x\n", oretaddr)
 
   // now we can fill in our custom return address.
   err = inferior.WriteWord(uintptr(regs.Rsp), uint64(rettarget))
@@ -424,13 +470,13 @@ func iprotect(inferior *ptrace.Tracee, addr uintptr, len uint,
     return fmt.Errorf("did not return to target 0x%0x: %v", rettarget, err)
   }
 
-  fmt.Printf("[go] %d on 0x%0x. ", prot, addr)
+  fmt.Printf("[go] %d on 0x%0x--0x%0x. ", prot, addr, addr+uintptr(len))
   // I'm so hilarious:
   fmt.Println("Now back to your regularly scheduled programming.")
   if err := inferior.SetRegs(orig_regs) ; err != nil { // restore registers.
     return err
   }
-  fmt.Printf("[go] restoring: 0x%x -> 0x%x @ 0x%x\n", rettarget, oretaddr,
+  fmt.Printf("[go] restoring SP: 0x%x -> 0x%08x @ 0x%x\n", rettarget, oretaddr,
              uintptr(orig_regs.Rsp))
   if err := inferior.WriteWord(uintptr(orig_regs.Rsp), oretaddr) ; err != nil {
 
@@ -533,6 +579,32 @@ func ihandle(inferior *ptrace.Tracee) (ievent, error) {
   return status, errors.New("unknown case!")
 }
 
+func find_opcode(opcode x86asm.Op, inferior *ptrace.Tracee,
+                 startaddr uintptr) (uintptr, error) {
+  insn := make([]byte, 16)
+  addr := startaddr
+  for {
+    if err := inferior.Read(addr, insn) ; err != nil {
+      return 0x0, err
+    }
+    ixn, err := x86asm.Decode(insn, 64)
+    if err != nil {
+      return 0x0, err
+    }
+
+    if opcode_in(ixn.Op, []x86asm.Op{opcode}) {
+      return addr, nil
+    }
+
+    addr += uintptr(ixn.Len)
+    // do we want to do this?
+    if ixn.Op == x86asm.JMP { // follow unconditional jumps.
+      addr += uintptr(ixn.Args[0].(x86asm.Rel))
+    }
+  }
+  return 0x0, errors.New("instruction never found")
+}
+
 // runs a program, replacing every 'malloc' in a program with
 // 'tjfmalloc'---a faux malloc implementation that forwards to
 // posix_memalign && mprotect.
@@ -610,7 +682,7 @@ func mallocs(argv []string) {
         }
       } else if iev.iptr == retbp.Address { // coming back from a malloc.
         alc.base = uintptr(stk.RetVal(inferior))
-        fmt.Printf("%v\n", alc)
+        fmt.Printf("[go] %v @ 0x%x\n", alc, iev.iptr)
         allocs = append(allocs, alc)
 
         // remove the BP.
@@ -624,12 +696,12 @@ func mallocs(argv []string) {
           log.Fatalf("could not re-insert malloc bp: %v\n", err)
         }
       } else if iev.iptr == access.bp.Address { // coming back from 'allow'
+        fmt.Printf("[go] hit access BP @ 0x%x\n", iev.iptr)
         if err := debug.Unbreak(inferior, access.bp) ; err != nil {
           log.Fatalf("could not remove access BP: %v\n", err)
         }
+        access.bp.Address = 0x0 // make sure it's not re-used.
 
-        rs := stk.RetAddr(inferior)
-        fmt.Printf("deny: would return to 0x%0x, now: 0x%0x\n", rs, iev.iptr)
         err := deny(inferior, access.alloc.base, access.alloc.length, iev.iptr)
         if err != nil {
           log.Fatalf("could not revoke perms for: %v\n", err)
@@ -639,25 +711,40 @@ func mallocs(argv []string) {
       var stk x86_64
       alc, err := find_alloc(allocs, iev.addr)
       if err != nil {
-        log.Fatalf("inferior SIGSEGV'd at: 0x%0x\n", iev.addr)
+        rs := stk.RetAddr(inferior)
+        fmt.Printf("alloc not found in %d-elem list\n", len(allocs))
+        log.Fatalf("inferior SIGSEGV'd at: 0x%0x, -> 0x%0x\n", iev.addr, rs)
       }
-      fmt.Printf("[go] accessed allocation 0x%0x--0x%0x (0x%0x)\n", alc.begin(),
-                 alc.end(), iev.addr)
-      retsite := stk.RetAddr(inferior)
-      fmt.Printf("[go] will allow it and then return to 0x%0x.\n", retsite)
+      iptr, err := inferior.GetIPtr()
+      if err != nil {
+        log.Fatalf("no iptr: %v\n", err)
+      }
+      fmt.Printf("[go] 0x%x accessed allocation 0x%0x--0x%0x (0x%0x)\n", iptr,
+                 alc.begin(), alc.end(), iev.addr)
+
+      fmt.Printf("[go] will allow it and then return to 0x%0x.\n", iptr)
       if err := inferior.ClearSignal() ; err != nil {
         log.Fatalf("could not clear segv: %v\n", err)
       }
-      if err := allow(inferior, alc.base, alc.length, retsite) ; err != nil {
+      if err := allow(inferior, alc.base, alc.length, iptr) ; err != nil {
         log.Fatalf("could not allow 0x%0x: %v\n", alc.base, err)
       }
       access.alloc = alc
 
-      // todo/fixme: now we have to find the exit point of the function and
-      // insert a breakpoint, which we copy into access.bp, so that we can
-      // re-enable the RO nature of the memory and thus detect the *next*
-      // access.
+      // Search for the 'RET' and insert a BP that we will use to re-enable the
+      // memory protection (and thereby detect subsequent accesses).
+      // todo/fixme: We should probably search from the start of the function,
+      // not from 'rs'.
+      ret, err := find_opcode(x86asm.RET, inferior, iptr)
+      if err != nil {
+        log.Fatalf("could not find RET starting from 0x%0x\n", iptr)
+      }
+      fmt.Printf("[go] inserting access/RETQ bp at 0x%0x\n", ret)
 
+      access.bp, err = debug.Break(inferior, ret)
+      if err != nil {
+        log.Fatalf("could not insert 0x%0x bp: %v\n", ret, err)
+      }
     default:
       log.Fatalf("unhandled event type: %v\n", iev)
     }
@@ -950,7 +1037,7 @@ func alloc_inferior(inferior *ptrace.Tracee, mmap uintptr,
   // can restore it later.
   // That said, we're just starting main, so whatever's in %rsp is probably
   // garbage.  But i'm a stickler for 'leave no trace', soooo....
-  save_stack, err := inferior.ReadWord(uintptr(regs.Rsp))
+  stackptr, err := inferior.ReadWord(uintptr(regs.Rsp))
   if err != nil {
     return 0x0, err
   }
@@ -979,7 +1066,7 @@ func alloc_inferior(inferior *ptrace.Tracee, mmap uintptr,
   if err := inferior.SetRegs(orig_regs) ; err != nil {
     return 0x0, err
   }
-  if err := inferior.WriteWord(uintptr(regs.Rsp), save_stack) ; err != nil {
+  if err := inferior.WriteWord(uintptr(orig_regs.Rsp), stackptr) ; err != nil {
     return 0x0, fmt.Errorf("could not reset *%rsp with correct addr: %v", err)
   }
   return retval, nil
