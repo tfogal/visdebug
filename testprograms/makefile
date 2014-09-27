@@ -54,4 +54,4 @@ indirect: indirect.o
 
 clean:
 	rm -f $(obj) 3dloop dimensional branching contbreak nest forloops nested
-	rm -f pauser small checkstack s3d indirect
+	rm -f pauser small checkstack s3d indirect handle relax
