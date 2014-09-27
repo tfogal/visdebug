@@ -117,17 +117,6 @@ print_section_headers(const uintptr_t addr, const size_t nhdrs, pid_t pid) {
   }
 }
 
-uintptr_t
-whereami(pid_t inferior) {
-  struct user_regs_struct regs;
-  regs.rip = 0x0;
-  if(ptrace(PTRACE_GETREGS, inferior, 0, &regs) != 0) {
-    perror("getting registers");
-    return 0x0;
-  }
-  return regs.rip;
-}
-
 /** @param dynsection address of the dynamic section */
 MALLOC static Elf64_Dyn*
 find_got(pid_t inferior, const uintptr_t dynsection) {
@@ -225,8 +214,6 @@ read_process_bfd(const char* fn, pid_t chld) {
   }
 }
 
-
-long procread(void* into, size_t n, size_t offset);
 
 typedef long(rdinf)(void* into, size_t n, size_t offset);
 symtable_t* read_symtab(rdinf* rd);
@@ -517,135 +504,14 @@ find_symbol(const char* name, const symtable_t* sym) {
   return NULL;
 }
 
-/* these are needed to make up for Go being annoying and not having any way to
- * express these ideas. */
+/* these are needed to make up for Go not having any way to grab these sizes. */
 PURE size_t Elf64_Dynsz() { return sizeof(Elf64_Dyn); }
 PURE size_t Elf64_Sxwordsz() { return sizeof(Elf64_Sxword); }
 PURE size_t rmap_offset() { return offsetof(struct r_debug, r_map); }
 PURE uintptr_t uintptr(const void* p) { return (uintptr_t)p; }
 
-/* Somewhere inside the _DYNAMIC section of the inferior's memory, we should
- * find a DT_DEBUG symbol.  If there's no debug info at all, then eventually
- * we'll just run off the process' address space and get an errno while
- * reading.  The DT_DEBUG leads us to the link_map structure.
- * @param addr_dynamic address of the _DYNAMIC symbol in the inferior. */
-uintptr_t
-lmap_head(pid_t inferior, uintptr_t addr_dynamic) {
-  errno=0;
-  for(uintptr_t dynaddr=addr_dynamic; errno==0; dynaddr+=sizeof(Elf64_Dyn)) {
-    errno = 0;
-    /* this 'tag' is the d_tag of an Elf64_Dyn */
-    long tag = ptrace(PTRACE_PEEKDATA, inferior, dynaddr, 0);
-    if(errno != 0) {
-      fprintf(stderr, "could not read tag from proc %d: %d\n", inferior, errno);
-      assert(tag == -1);
-      return 0x0;
-    }
-    TRACE(sections, "dyn tag: %ld\n", tag);
-    switch(tag) {
-      case DT_NULL: errno=ENOENT; break; /* bail out, end of Dyns. */
-      case DT_DEBUG: {
-        printf("found the debug tag at address 0x%0lx, 0x%0lx\n", dynaddr,
-               dynaddr+sizeof(Elf64_Sxword));
-        /* at tag +1 word, we find the pointer to the r_debug struct. */
-        errno=0;
-        const long rdbg = ptrace(PTRACE_PEEKDATA, inferior,
-                                 dynaddr+sizeof(Elf64_Sxword), 0);
-        if(errno != 0) {
-          fprintf(stderr, "ptrace r_debug base read err: %d\n", errno);
-          return 0x0;
-        }
-        printf("rdebug at 0x%0lx\n", rdbg);
-        /* we can read the r_debug now, but we want the link map. */
-        const uintptr_t lmapaddr = rdbg + offsetof(struct r_debug, r_map);
-        /* now we have the address of r_map, but we want r_map itself. */
-        const long lmap = ptrace(PTRACE_PEEKDATA, inferior, lmapaddr, 0);
-        if(errno != 0) {
-          fprintf(stderr, "ptrace r_map base read err: %d\n", errno);
-          return 0x0;
-        }
-        return (uintptr_t)lmap;
-      }
-    }
-  }
-  return 0x0;
-}
-
 PURE size_t lmap_lname_offset() { return offsetof(struct link_map, l_name); }
 PURE size_t lmap_lnext_offset() { return offsetof(struct link_map, l_next); }
-
-MALLOC struct link_map*
-load_lmap(pid_t inferior, uintptr_t laddr) {
-  struct link_map* rv = calloc(1, sizeof(struct link_map));
-  if(rv == NULL) {
-    fprintf(stderr, "allocation error.\n");
-    return NULL;
-  }
-  errno=0;
-  if(read_inferior(&rv->l_addr, laddr, sizeof(Elf64_Addr), inferior)) {
-    fprintf(stderr, "error reading library addr: %d\n", errno);
-  }
-  if(read_inferior(&rv->l_name, laddr+offsetof(struct link_map,l_name),
-                   sizeof(char*), inferior)) {
-    fprintf(stderr, "error reading addr (0x%0lx) of library name: %d\n",
-            laddr+offsetof(struct link_map, l_name), errno);
-  }
-  if(read_inferior(&rv->l_ld, laddr+offsetof(struct link_map,l_ld),
-                   sizeof(Elf64_Dyn*), inferior)) {
-    fprintf(stderr, "error reading l_ld of library: %d\n", errno);
-  }
-  if(read_inferior(&rv->l_next, laddr+offsetof(struct link_map,l_next),
-                   sizeof(struct link_map*), inferior)) {
-    fprintf(stderr, "error reading l_next of library: %d\n", errno);
-  }
-  if(read_inferior(&rv->l_prev, laddr+offsetof(struct link_map,l_prev),
-                   sizeof(struct link_map*), inferior)) {
-    fprintf(stderr, "error reading l_prev of library: %d\n", errno);
-  }
-  if(errno != 0) {
-    fprintf(stderr, "Error loading link_map fields: %d\n", errno);
-    free(rv);
-    return NULL;
-  }
-  /* instead of the address of the name, let's get the actual/real name. */
-  const uintptr_t lname = (uintptr_t)rv->l_name;
-  /* how big is the string?  we don't know.  let's just read a lot.  it should
-   * be null-terminated, so hopefully this is okay.. */
-  rv->l_name = calloc(256, sizeof(char));
-  if(read_inferior(rv->l_name, lname, 256, inferior) != 0) {
-    fprintf(stderr, "error reading library name (lmap) string: %d\n", errno);
-  }
-  return rv;
-}
-
-void
-free_lmap(struct link_map* lm) {
-  free(lm->l_name);
-  free(lm);
-}
-
-/* A symbol filter.  If true, the symbol is allowed to stay. */
-typedef bool(symfilt)(const symbol s, void*);
-/* @return the symbols that pass the function from the list 'sy'.  The symbols
- * are deep-copied. */
-symtable_t*
-filter_symbols(const symtable_t* sy, symfilt* youshallpass, void* user) {
-  symtable_t* newsym = calloc(1, sizeof(symtable_t));
-  newsym->n = 0;
-  newsym->bols = calloc(sy->n, sizeof(symbol));
-  for(size_t i=0; i < sy->n; ++i) {
-    if(!youshallpass(sy->bols[i],user)) {continue;} /* RIP Gandalf the Grey. */
-    newsym->bols[newsym->n].name = strdup(sy->bols[i].name);
-    newsym->bols[newsym->n].address = sy->bols[i].address;
-    newsym->n++;
-  }
-  return newsym;
-}
-bool
-already_present(const symbol s, void* existing_table) {
-  const symtable_t* existing = (const symtable_t*)existing_table;
-  return find_symbol(s.name, existing) != NULL;
-}
 
 /* offsets the symbols by the given base address... if that makes sense. */
 void
