@@ -10,6 +10,7 @@ import "debug/elf"
 import "errors"
 import "fmt"
 import "io/ioutil"
+import "log"
 import "os"
 import "reflect"
 import "sort"
@@ -291,6 +292,55 @@ var needed = []needed_sym{
   {"libc.so", "posix_memalign"},
 }
 
+type linkmap struct {
+  l_addr uintptr
+  l_next uintptr
+  libname string
+}
+func loadlinkmap(inferior *ptrace.Tracee, addr uintptr) (linkmap, error) {
+  lmap := linkmap{}
+
+  l_addr, err := inferior.ReadWord(addr)
+  if err != nil {
+    return linkmap{}, fmt.Errorf("error reading l_addr (0x%x): %v", addr, err)
+  }
+  lmap.l_addr = uintptr(l_addr)
+
+  lname, err := inferior.ReadWord(addr+lname_offset())
+  if err != nil {
+    return linkmap{}, fmt.Errorf("error reading l_lname (0x%x): %v",
+                                 addr+lname_offset(), err)
+  }
+  // That gave us the offset of the name, but we still need to read the actual
+  // name.  We have absolutely no idea how long the name is, so we just assume
+  // "very long".
+  namemem := make([]byte, 256)
+  if err := inferior.Read(uintptr(lname), namemem) ; err != nil {
+    return linkmap{}, fmt.Errorf("error read libname (from 0x%x): %v", lname,
+                                 err)
+  }
+  lmap.libname = string(namemem[:strings.IndexByte(string(namemem), 0)])
+
+  lnext, err := inferior.ReadWord(addr+lnext_offset())
+  if err != nil {
+    return linkmap{}, fmt.Errorf("error reading l_next (0x%x): %v",
+                                 addr+lnext_offset(), err)
+  }
+  lmap.l_next = uintptr(lnext)
+
+  return lmap, nil
+}
+
+// just wrappers around the C functions so that casting is taken care of.
+func lname_offset() uintptr {
+  offs := C.lmap_lname_offset()
+  return uintptr(offs)
+}
+func lnext_offset() uintptr {
+  offs := C.lmap_lnext_offset()
+  return uintptr(offs)
+}
+
 /* reads symbols from the process, properly relocating them to get their actual
  * address. */
 func SymbolsProcess(inferior *ptrace.Tracee) ([]Symbol, error) {
@@ -312,17 +362,19 @@ func SymbolsProcess(inferior *ptrace.Tracee) ([]Symbol, error) {
   fmt.Fprintf(strm, "head is at: 0x%x\n", lmap_addr)
 
   for {
-    lmap := C.load_lmap(C.pid_t(inferior.PID()), C.uintptr_t(lmap_addr))
-    libname := C.GoString(lmap.l_name)
-    defer C.free_lmap(lmap)
+    lmap, err := loadlinkmap(inferior, lmap_addr)
+    if err != nil {
+      log.Fatalf("could not load link map 0x%x: %v\n", lmap_addr, err)
+    }
     fmt.Fprintf(strm, "Library loaded at 0x%012x, next at %p [%s]\n",
-                lmap.l_addr, lmap.l_next, libname)
+                lmap.l_addr, lmap.l_next, lmap.libname)
     lmap_addr = uintptr(C.uintptr(unsafe.Pointer(lmap.l_next))) // next round.
-    if libname == "" { // skip empty libraries; no symbols we care about there
+    // skip empty libraries: no symbols we care about there
+    if lmap.libname == "" {
       continue
     }
 
-    fp, err := os.Open(libname)
+    fp, err := os.Open(lmap.libname)
     if err != nil { // maybe happens with debug libraries that arent installed?
       continue
     }
@@ -331,7 +383,7 @@ func SymbolsProcess(inferior *ptrace.Tracee) ([]Symbol, error) {
     if err != nil { panic(err) }
 
     fmt.Fprintf(strm, "Read %d symbols from %s, relocating by 0x%x\n",
-                len(libsym), libname, lmap.l_addr)
+                len(libsym), lmap.libname, lmap.l_addr)
 
     relocate_symbols(libsym, uintptr(lmap.l_addr))
 
@@ -340,10 +392,10 @@ func SymbolsProcess(inferior *ptrace.Tracee) ([]Symbol, error) {
     // shared libraries that we really need, regardless of if they are directly
     // used by the application.
     for _, need := range needed {
-      if strings.Contains(libname, need.fromlibrary) {
+      if strings.Contains(lmap.libname, need.fromlibrary) {
         symb := find_symbol(need.symname, libsym)
         if symb != nil {
-          fmt.Fprintf(strm, "Adding %s from %s.\n", symb.Name(), libname)
+          fmt.Fprintf(strm, "Adding %s from %s.\n", symb.Name(), lmap.libname)
           symbols = append(symbols, *symb)
         }
       }

@@ -35,3 +35,5 @@ PURE size_t Elf64_Dynsz();
 PURE size_t Elf64_Sxwordsz();
 PURE size_t rmap_offset();
 PURE uintptr_t uintptr(const void*);
+PURE size_t lmap_lname_offset();
+PURE size_t lmap_lnext_offset();

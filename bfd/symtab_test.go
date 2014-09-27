@@ -175,3 +175,11 @@ func BenchmarkSymbolsProcess(t *testing.B) {
   SymbolsProcess(inferior)
   inferior.SendSignal(syscall.SIGKILL)
 }
+
+// simple test to make sure the C bindings to offsetof() are valid.
+func TestLmapOffsets(t *testing.T) {
+  if lname_offset() >= lnext_offset() {
+    t.Fatalf("lname offset (%d) should be l.t. lnext offset (%d)",
+             lname_offset(), lnext_offset())
+  }
+}

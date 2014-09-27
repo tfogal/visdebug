@@ -571,6 +571,9 @@ lmap_head(pid_t inferior, uintptr_t addr_dynamic) {
   return 0x0;
 }
 
+PURE size_t lmap_lname_offset() { return offsetof(struct link_map, l_name); }
+PURE size_t lmap_lnext_offset() { return offsetof(struct link_map, l_next); }
+
 MALLOC struct link_map*
 load_lmap(pid_t inferior, uintptr_t laddr) {
   struct link_map* rv = calloc(1, sizeof(struct link_map));
