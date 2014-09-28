@@ -154,7 +154,11 @@ func window_test() {
       14.48, 270.23, 443.68,
     }
     dims := [2]uint{2,3}
-    gfx.Render(garbage, dims)
+    sfield := gfx.ScalarField2D()
+    sfield.Pre()
+    sfield.Render(garbage, dims)
+    sfield.Render(garbage, dims)
+    sfield.Post()
   }
   gfx.Close()
 }
