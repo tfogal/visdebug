@@ -10,6 +10,7 @@ import(
   "io"
   "os"
   "log"
+  "runtime"
   "runtime/pprof"
   "strings"
   "syscall"
@@ -18,6 +19,7 @@ import(
   "./bfd"
   "./cfg"
   "./debug"
+  "./gfx"
   "./msg"
 )
 
@@ -76,14 +78,17 @@ var showmallocs bool
 var dyninfo bool
 var freespace bool
 var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
+var wintest bool
 func init() {
+  runtime.LockOSThread()
   flag.BoolVar(&symlist, "symbols", false, "print out the symbol table")
   flag.BoolVar(&symlist, "s", false, "print out the symbol table")
   flag.BoolVar(&execute, "x", false, "execute subprogram")
   flag.BoolVar(&dotcfg, "cfg", false, "compute and print CFG")
-  flag.BoolVar(&showmallocs, "mallocs", false, "print a line per malloc")
+  flag.BoolVar(&showmallocs, "mallocs", false, "trace and report mallocs")
   flag.BoolVar(&dyninfo, "attach", false, "attach and print dynamic info")
   flag.BoolVar(&freespace, "free", false, "show maps and find first free space")
+  flag.BoolVar(&wintest, "window", false, "run graphics / windowing test")
 }
 
 func basename(s string) (string) {
@@ -135,6 +140,23 @@ func main() {
   if freespace {
     show_free_space(argv)
   }
+  if wintest {
+    go window_test()
+    gfx.Main()
+  }
+}
+
+func window_test() {
+  gfx.Context()
+  {
+    garbage := []float32{
+       0.00, 246.32, 445.32,
+      14.48, 270.23, 443.68,
+    }
+    dims := [2]uint{2,3}
+    gfx.Render(garbage, dims)
+  }
+  gfx.Close()
 }
 
 func interactive(argv []string) {
