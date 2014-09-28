@@ -146,14 +146,50 @@ func main() {
   }
 }
 
+func maxf(arr []float32) float32 {
+  mx := float32(-42.42424242);
+  for _, v := range arr {
+    if v > mx {
+      mx = v
+    }
+  }
+  return mx
+}
+func minf(arr []float32) float32 {
+  mn := float32(42.42424242)
+  for _, v := range arr {
+    if v < mn {
+      mn = v
+    }
+  }
+  return mn
+}
+
+func normalize(arr []float32) {
+  minimum := minf(arr)
+  for i := range arr{
+    arr[i] = (arr[i] - minimum)
+  }
+  maximum := maxf(arr)
+  for i := range arr {
+    arr[i] /= maximum
+  }
+}
+
 func window_test() {
   gfx.Context()
   {
     garbage := []float32{
-       0.00, 246.32, 445.32,
-      14.48, 270.23, 443.68,
+//      1.00,  1.00,  1.00,
+//      0.70,  0.70,  0.70,
+//      0.00, 0.50, 1.00,
+//      0.00, 0.50, 1.00,
+      1.0,
+      0.0,
     }
-    dims := [2]uint{2,3}
+    //normalize(garbage)
+    fmt.Printf("gbg: %v\n", garbage)
+    dims := [2]uint{1,2}
     sfield := gfx.ScalarField2D()
     sfield.Pre()
     sfield.Render(garbage, dims)
