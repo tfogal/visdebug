@@ -22,10 +22,11 @@ const fragshader = `
 out vec4 fragColor;
 in vec2 tcoord;
 uniform sampler2D texScalar2D; // must match 'tex2dname', above!
+uniform float fieldmax;
 
 void main() {
   vec2 tc = vec2(1.0-tcoord.x/2.0, tcoord.y/2.0);
-  float value = texture(texScalar2D, tc).x;
+  float value = texture(texScalar2D, tc).x / fieldmax;
   //fragColor = vec4(tc.x, tc.y, value, 1.0);
   //fragColor = vec4(tcoord.x, tcoord.y, value, 1.0);
   fragColor = vec4(0.0, 0.0, value, 1.0);
@@ -52,7 +53,7 @@ func flush_errors(pre string) {
 
 type Scalar2D interface {
   Pre()
-  Render(data []float32, dims [2]uint)
+  Render(data []float32, dims [2]uint, maximum float32)
   Post()
 }
 
@@ -62,6 +63,7 @@ type s2d struct {
   program gl.Program
   quad []float32
   texture gl.Texture
+  fldmaxloc gl.UniformLocation
 }
 
 func ScalarField2D() Scalar2D {
@@ -94,6 +96,9 @@ func s2dprogram() gl.Program {
   program.BindFragDataLocation(0, "fragColor")
   program.Link()
   program.Use()
+
+  fldmax := program.GetUniformLocation("fieldmax")
+  gfx.Trace("field max loc is: %v\n", fldmax)
 
   pos := program.GetAttribLocation("position")
   pos.EnableArray()
@@ -142,6 +147,8 @@ func (s s2d) Pre() {
     txs2d := s.program.GetUniformLocation(tex2dname)
     txs2d.Uniform1i(0)
     flush_errors("setting '" + tex2dname + "' uniform.")
+
+    s.fldmaxloc = s.program.GetUniformLocation("fieldmax")
   })
 }
 
@@ -154,7 +161,7 @@ func (s s2d) Post() {
   })
 }
 
-func (s s2d) Render(data []float32, dims [2]uint) {
+func (s s2d) Render(data []float32, dims [2]uint, maximum float32) {
   Exec(func() {
     const format = gl.LUMINANCE
     const typ = gl.FLOAT
@@ -163,6 +170,9 @@ func (s s2d) Render(data []float32, dims [2]uint) {
     gl.TexImage2D(gl.TEXTURE_2D, 0, intformat, int(dims[0]),int(dims[1]), 0,
                   format, typ, data)
     flush_errors("set texture")
+
+    s.fldmaxloc.Uniform1f(maximum)
+    flush_errors("set fieldmax uniform:")
 
     gl.DrawArrays(gl.QUADS, 0, 4)
     flush_errors("drawn")

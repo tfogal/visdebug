@@ -180,20 +180,18 @@ func window_test() {
   gfx.Context()
   {
     garbage := []float32{
-//      1.00,  1.00,  1.00,
-//      0.70,  0.70,  0.70,
-//      0.00, 0.50, 1.00,
-//      0.00, 0.50, 1.00,
-      1.0,
-      0.0,
+      0.00,  5.31,  09.139,
+      9.00, 12.31,  08.124,
     }
     //normalize(garbage)
     fmt.Printf("gbg: %v\n", garbage)
-    dims := [2]uint{1,2}
+    // columns, rows
+    dims := [2]uint{3,2}
     sfield := gfx.ScalarField2D()
     sfield.Pre()
-    sfield.Render(garbage, dims)
-    sfield.Render(garbage, dims)
+    mx := maxf(garbage)
+    sfield.Render(garbage, dims, mx)
+    sfield.Render(garbage, dims, mx)
     sfield.Post()
   }
   gfx.Close()
