@@ -10,6 +10,7 @@ import(
   "io"
   "os"
   "log"
+  "math"
   "runtime"
   "runtime/pprof"
   "strings"
@@ -132,7 +133,8 @@ func main() {
     interactive(argv)
   }
   if showmallocs {
-    mallocs(argv)
+    go mallocs(argv)
+    gfx.Main()
   }
   if dyninfo {
     print_address_info(argv)
@@ -183,7 +185,6 @@ func window_test() {
       0.00,  5.31,  09.139,
       9.00, 12.31,  08.124,
     }
-    //normalize(garbage)
     fmt.Printf("gbg: %v\n", garbage)
     // columns, rows
     dims := [2]uint{3,2}
@@ -571,8 +572,9 @@ func (a allocation) String() string {
   return fmt.Sprintf("alloc(%d) -> 0x%08x", a.length, a.base)
 }
 
-func find_alloc(allocs []allocation, addr uintptr) (allocation, error) {
-  for _, alc := range allocs {
+func find_alloc(vmem []visualmem, addr uintptr) (allocation, error) {
+  for _, vm := range vmem {
+    alc := vm.alloc
     if alc.begin() <= addr && addr <= alc.end() {
       return alc, nil
     }
@@ -665,6 +667,27 @@ func find_opcode(opcode x86asm.Op, inferior *ptrace.Tracee,
   return 0x0, errors.New("instruction never found")
 }
 
+type visualmem struct {
+  gsfield gfx.Scalar2D
+  data []float32
+  dims [2]uint
+  alloc allocation
+}
+
+// disgusting function that copies a byte array that represents a bunch of
+// floating point numbers into a float array.
+func copyf8(to []float32, from []byte) {
+  if len(from) % 4 != 0 {
+    log.Fatalf("garbage size %d from []byte source\n", len(from))
+  }
+  fmt.Printf("copying %d elements...\n", len(from)/4)
+
+  for i:=0 ; i < len(from); i += 4 {
+    bits := binary.LittleEndian.Uint32(from[i:])
+    to[i/4] = math.Float32frombits(bits)
+  }
+}
+
 // runs a program, replacing every 'malloc' in a program with
 // 'tjfmalloc'---a faux malloc implementation that forwards to
 // posix_memalign && mprotect.
@@ -709,8 +732,16 @@ func mallocs(argv []string) {
   }
   var access maccess
 
-  var alc allocation
-  allocs := make([]allocation, 0)
+  fmt.Printf("pre-ctx ...\n")
+  // establish our OGL stuff.
+  gfx.Context()
+  defer gfx.Close()
+
+  updates := uint(0)
+
+  fmt.Printf("ctx established, moving on...\n")
+  var vm visualmem
+  vmem := make([]visualmem, 0)
   for {
     ievent, err := ihandle(inferior)
     if err == io.EOF {
@@ -724,7 +755,7 @@ func mallocs(argv []string) {
       // but what did we hit?
       if iev.iptr == symmalloc.Address() { // hit malloc.
         // record the size of the alloc.
-        alc.length = uint(stk.Arg1(inferior))
+        vm.alloc.length = uint(stk.Arg1(inferior))
 
         // remove the BP
         if err := debug.Unbreak(inferior, mallocbp) ; err != nil {
@@ -741,9 +772,13 @@ func mallocs(argv []string) {
           log.Fatalf("inserting breakpoint for malloc return site: %v\n", err)
         }
       } else if iev.iptr == retbp.Address { // coming back from a malloc.
-        alc.base = uintptr(stk.RetVal(inferior))
-        fmt.Printf("[go] %v @ 0x%x\n", alc, iev.iptr)
-        allocs = append(allocs, alc)
+        vm.alloc.base = uintptr(stk.RetVal(inferior))
+        fmt.Printf("[go] %v @ 0x%x\n", vm.alloc, iev.iptr)
+        vm.gsfield = gfx.ScalarField2D()
+        vm.gsfield.Pre()
+        vm.dims = [2]uint{25, 50} // hack
+        vm.data = make([]float32, vm.dims[0]*vm.dims[1])
+        vmem = append(vmem, vm)
 
         // remove the BP.
         if err := debug.Unbreak(inferior, retbp) ; err != nil {
@@ -755,12 +790,31 @@ func mallocs(argv []string) {
         if err != nil {
           log.Fatalf("could not re-insert malloc bp: %v\n", err)
         }
-      } else if iev.iptr == access.bp.Address { // coming back from 'allow'
+      } else if iev.iptr == access.bp.Address { // done w/ fqn that needs allow
         fmt.Printf("[go] hit access BP @ 0x%x\n", iev.iptr)
         if err := debug.Unbreak(inferior, access.bp) ; err != nil {
           log.Fatalf("could not remove access BP: %v\n", err)
         }
         access.bp.Address = 0x0 // make sure it's not re-used.
+
+        if updates % 50 == 0 {
+          updates = 0
+          // todo/bad: don't use 'vm' here, that assumes the most recent memory
+          // is the one of interest here, which might not be true.
+          tmp := make([]byte, vm.dims[0]*vm.dims[1]*4)
+          fmt.Printf("reading 0x%x--0x%x\n", vm.alloc.base,
+                     vm.alloc.base+uintptr(len(tmp)))
+          if err := inferior.Read(vm.alloc.base, tmp) ; err != nil {
+            log.Fatalf("could not read inferior's data: %v\n", err)
+          }
+          // we need this gross tmp/copyf8 pair because our inferior.Read
+          // takes a []byte instead of an interface{} ... :-(
+          copyf8(vm.data, tmp)
+          mx := maxf(vm.data)
+          fmt.Printf("datamax: %f\n", mx)
+          vm.gsfield.Render(vm.data, vm.dims, mx)
+        }
+        updates++
 
         err := deny(inferior, access.alloc.base, access.alloc.length, iev.iptr)
         if err != nil {
@@ -769,10 +823,10 @@ func mallocs(argv []string) {
       }
     case segfault:
       var stk x86_64
-      alc, err := find_alloc(allocs, iev.addr)
+      alc, err := find_alloc(vmem, iev.addr)
       if err != nil {
         rs := stk.RetAddr(inferior)
-        fmt.Printf("alloc not found in %d-elem list\n", len(allocs))
+        fmt.Printf("alloc not found in %d-elem list\n", len(vmem))
         log.Fatalf("inferior SIGSEGV'd at: 0x%0x, -> 0x%0x\n", iev.addr, rs)
       }
       iptr, err := inferior.GetIPtr()
@@ -808,6 +862,9 @@ func mallocs(argv []string) {
     default:
       log.Fatalf("unhandled event type: %v\n", iev)
     }
+  }
+  for _, v := range vmem {
+    v.gsfield.Post()
   }
   fmt.Printf("[go] inferior (%d) terminated.\n", inferior.PID())
 }

@@ -14,7 +14,7 @@ out vec2 tcoord;
 
 void main() {
   gl_Position = vec4(position, 0.0, 1.0);
-  tcoord = position;
+  tcoord = gl_Position.xy + 0.5;
 }
 `
 const fragshader = `
@@ -25,11 +25,9 @@ uniform sampler2D texScalar2D; // must match 'tex2dname', above!
 uniform float fieldmax;
 
 void main() {
-  vec2 tc = vec2(1.0-tcoord.x/2.0, tcoord.y/2.0);
-  float value = texture(texScalar2D, tc).x / fieldmax;
-  //fragColor = vec4(tc.x, tc.y, value, 1.0);
-  //fragColor = vec4(tcoord.x, tcoord.y, value, 1.0);
-  fragColor = vec4(0.0, 0.0, value, 1.0);
+  float value = texture(texScalar2D, tcoord).x / fieldmax;
+  value = clamp(value, 0.0, 1.0);
+  fragColor = vec4(value, 0.0, 1.0-value, 1.0);
 }
 `
 
@@ -119,10 +117,10 @@ func (s s2d) Pre() {
     s.vertvbo = gl.GenBuffer()
     s.vertvbo.Bind(gl.ARRAY_BUFFER)
     s.quad = []float32{
-       1.0,  1.0,
-       1.0, -1.0,
-      -1.0, -1.0,
-      -1.0,  1.0,
+       0.9,  0.9,
+       0.9, -0.9,
+      -0.9, -0.9,
+      -0.9,  0.9,
     }
     // unsafe.Sizeof(quad) seems to think quad is 24 bytes, which is absurd.
     // so we just calculate the size manually.
@@ -140,10 +138,10 @@ func (s s2d) Pre() {
     gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
     gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
     gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
-//    gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_BORDER)
-//    gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_BORDER)
-    gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT)
-    gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT)
+    gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_BORDER)
+    gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_BORDER)
+//    gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT)
+//    gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT)
     txs2d := s.program.GetUniformLocation(tex2dname)
     txs2d.Uniform1i(0)
     flush_errors("setting '" + tex2dname + "' uniform.")
@@ -174,12 +172,12 @@ func (s s2d) Render(data []float32, dims [2]uint, maximum float32) {
     s.fldmaxloc.Uniform1f(maximum)
     flush_errors("set fieldmax uniform:")
 
+    gl.Clear(gl.COLOR_BUFFER_BIT)
+
     gl.DrawArrays(gl.QUADS, 0, 4)
     flush_errors("drawn")
 
     sdl.GL_SwapWindow(window)
     flush_errors("swapped")
-
-    sdl.Delay(8000)
   })
 }

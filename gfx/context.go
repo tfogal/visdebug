@@ -56,7 +56,7 @@ func Context() {
     sdl.GL_SetAttribute(C.SDL_GL_CONTEXT_MINOR_VERSION, 2)
     sdl.GL_SetAttribute(sdl.GL_CONTEXT_DEBUG_FLAG, 1)
     sdl.GL_SetAttribute(sdl.GL_CONTEXT_FLAGS , sdl.GL_CONTEXT_DEBUG_FLAG)
-    window = sdl.CreateWindow("test", sdl.WINDOWPOS_UNDEFINED,
+    window = sdl.CreateWindow("vismem", sdl.WINDOWPOS_UNDEFINED,
                               sdl.WINDOWPOS_UNDEFINED,
                               800, 600, sdl.WINDOW_SHOWN | sdl.WINDOW_OPENGL)
     glctx = sdl.GL_CreateContext(window)
