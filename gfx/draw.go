@@ -3,6 +3,7 @@ package gfx
 // #include <SDL2/SDL.h>
 // #include <SDL2/SDL_opengl.h>
 import "C"
+import "os"
 import "github.com/go-gl/gl"
 import "github.com/veandco/go-sdl2/sdl"
 
@@ -14,7 +15,7 @@ out vec2 tcoord;
 
 void main() {
   gl_Position = vec4(position, 0.0, 1.0);
-  tcoord = gl_Position.xy + 0.5;
+  tcoord = gl_Position.xy;
 }
 `
 const fragshader = `
@@ -25,7 +26,8 @@ uniform sampler2D texScalar2D; // must match 'tex2dname', above!
 uniform float fieldmax;
 
 void main() {
-  float value = texture(texScalar2D, tcoord).x / fieldmax;
+  vec2 tc = (tcoord.xy + vec2(0.9, 0.9)) / vec2(1.8, 1.8);
+  float value = texture(texScalar2D, tc).x / fieldmax;
   value = clamp(value, 0.0, 1.0);
   fragColor = vec4(value, 0.0, 1.0-value, 1.0);
 }
@@ -39,6 +41,7 @@ func flush_errors(pre string) {
       break
     }
     gfx.Error("GL error: 0x%x\n", errnum)
+    os.Exit(1)
   }
   for {
     msg, src, typ, id, _ := gl.GetNextDebugMessage()
