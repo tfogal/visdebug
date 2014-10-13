@@ -826,8 +826,8 @@ func mallocs(argv []string) {
       alc, err := find_alloc(vmem, iev.addr)
       if err != nil {
         rs := stk.RetAddr(inferior)
-        fmt.Printf("alloc not found in %d-elem list\n", len(vmem))
-        log.Fatalf("inferior SIGSEGV'd at: 0x%0x, -> 0x%0x\n", iev.addr, rs)
+        log.Fatalf("alloc not found in %d-elem list\ninferior SIGSEGV'd at:" +
+                   "0x%0x -> 0x%0x\n", len(vmem), iev.addr, rs)
       }
       iptr, err := inferior.GetIPtr()
       if err != nil {
