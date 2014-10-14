@@ -15,6 +15,7 @@ import(
   "runtime/pprof"
   "strings"
   "syscall"
+  "unsafe"
   "github.com/tfogal/ptrace"
   "code.google.com/p/rsc.x86/x86asm"
   "./bfd"
@@ -187,7 +188,8 @@ func window_test() {
     }
     fmt.Printf("gbg: %v\n", garbage)
     // columns, rows
-    dims := [2]uint{3,2}
+    dims := make([]uint, 2)
+    dims[0] = 3; dims[1] = 2
     sfield := gfx.ScalarField2D()
     sfield.Pre()
     mx := maxf(garbage)
@@ -670,7 +672,7 @@ func find_opcode(opcode x86asm.Op, inferior *ptrace.Tracee,
 type visualmem struct {
   gsfield gfx.Scalar2D
   data []float32
-  dims [2]uint
+  dims []uint
   alloc allocation
 }
 
@@ -772,14 +774,6 @@ func mallocs(argv []string) {
           log.Fatalf("inserting breakpoint for malloc return site: %v\n", err)
         }
       } else if iev.iptr == retbp.Address { // coming back from a malloc.
-        vm.alloc.base = uintptr(stk.RetVal(inferior))
-        fmt.Printf("[go] %v @ 0x%x\n", vm.alloc, iev.iptr)
-        vm.gsfield = gfx.ScalarField2D()
-        vm.gsfield.Pre()
-        vm.dims = [2]uint{25, 50} // hack
-        vm.data = make([]float32, vm.dims[0]*vm.dims[1])
-        vmem = append(vmem, vm)
-
         // remove the BP.
         if err := debug.Unbreak(inferior, retbp) ; err != nil {
           log.Fatalf("could not remove malloc-ret BP: %v\n", err)
@@ -790,6 +784,14 @@ func mallocs(argv []string) {
         if err != nil {
           log.Fatalf("could not re-insert malloc bp: %v\n", err)
         }
+
+        vm.alloc.base = uintptr(stk.RetVal(inferior))
+        fmt.Printf("[go] %v @ 0x%x\n", vm.alloc, iev.iptr)
+        vm.gsfield = gfx.ScalarField2D()
+        vm.gsfield.Pre()
+        var f32 float32
+        vm.data = make([]float32, vm.alloc.length/uint(unsafe.Sizeof(f32)))
+        vmem = append(vmem, vm)
       } else if iev.iptr == access.bp.Address { // done w/ fqn that needs allow
         fmt.Printf("[go] hit access BP @ 0x%x\n", iev.iptr)
         if err := debug.Unbreak(inferior, access.bp) ; err != nil {
@@ -797,7 +799,12 @@ func mallocs(argv []string) {
         }
         access.bp.Address = 0x0 // make sure it's not re-used.
 
-        if updates % 50 == 0 {
+        err := deny(inferior, access.alloc.base, access.alloc.length, iev.iptr)
+        if err != nil {
+          log.Fatalf("could not revoke perms for: %v\n", err)
+        }
+
+        if vm.dims != nil && updates % 50 == 0 {
           updates = 0
           // todo/bad: don't use 'vm' here, that assumes the most recent memory
           // is the one of interest here, which might not be true.
@@ -815,11 +822,6 @@ func mallocs(argv []string) {
           vm.gsfield.Render(vm.data, vm.dims, mx)
         }
         updates++
-
-        err := deny(inferior, access.alloc.base, access.alloc.length, iev.iptr)
-        if err != nil {
-          log.Fatalf("could not revoke perms for: %v\n", err)
-        }
       }
     case segfault:
       var stk x86_64
@@ -859,6 +861,16 @@ func mallocs(argv []string) {
       if err != nil {
         log.Fatalf("could not insert 0x%0x bp: %v\n", ret, err)
       }
+
+      dims, err := bounds(argv[0], inferior)
+      if err != nil {
+        log.Printf("error getting bounds: %v\n", err)
+        // just skip this, then.  this might happen when accessing data outside
+        // a loop, or e.g. as calloc does.
+        continue
+      }
+      fmt.Printf("[go] found dims of %v\n", dims)
+      vm.dims = dims
     default:
       log.Fatalf("unhandled event type: %v\n", iev)
     }
@@ -867,6 +879,30 @@ func mallocs(argv []string) {
     v.gsfield.Post()
   }
   fmt.Printf("[go] inferior (%d) terminated.\n", inferior.PID())
+}
+
+func bounds(program string, inferior *ptrace.Tracee) ([]uint, error) {
+  symbol, err := where(inferior)
+  if err != nil {
+    log.Fatalf("Cannot find where we are: %v", err)
+  }
+  fmt.Printf("we think are at: %s (0x%0x)\n", symbol.Name(),
+             symbol.Address())
+  if strings.Contains(symbol.Name(), "@@") {
+    // then it's a C library function, don't bother, it's probably
+    // calloc or something.
+    return nil, fmt.Errorf("%s is a library function", symbol.Name())
+  }
+  graph := cfg.FromAddress(program, symbol.Address())
+  if rn := root_node(graph, symbol) ; rn != nil {
+    cfg.Analyze(rn)
+  }
+  bb, err := basic_block(graph, whereis(inferior))
+  if err != nil {
+    log.Fatalf("It is pitch dark.  We have been eaten by a grue: %v",
+               err)
+  }
+  return bind_identify(symbol.Name(), bb, inferior)
 }
 
 // A process / shared library leaves some free space after it's loaded.  This

@@ -54,7 +54,7 @@ func flush_errors(pre string) {
 
 type Scalar2D interface {
   Pre()
-  Render(data []float32, dims [2]uint, maximum float32)
+  Render(data []float32, dims []uint, maximum float32)
   Post()
 }
 
@@ -162,7 +162,12 @@ func (s s2d) Post() {
   })
 }
 
-func (s s2d) Render(data []float32, dims [2]uint, maximum float32) {
+func (s s2d) Render(data []float32, dims []uint, maximum float32) {
+  if len(dims) != 2 {
+    gfx.Error("%d dimensional data cannot be handled by this 2d code",
+              len(dims))
+    return
+  }
   Exec(func() {
     const format = gl.LUMINANCE
     const typ = gl.FLOAT
