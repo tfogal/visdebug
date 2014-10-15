@@ -10,7 +10,7 @@ import(
   "io"
   "os"
   "log"
-  "math"
+  "reflect"
   "runtime"
   "runtime/pprof"
   "strings"
@@ -676,18 +676,21 @@ type visualmem struct {
   alloc allocation
 }
 
-// disgusting function that copies a byte array that represents a bunch of
-// floating point numbers into a float array.
-func copyf8(to []float32, from []byte) {
-  if len(from) % 4 != 0 {
-    log.Fatalf("garbage size %d from []byte source\n", len(from))
+// disgusting function to copy from a byte-slice-of-floats to an
+// actual-slice-of-floats.  We need this because syscall.Ptrace*'s reads are
+// broken, they should give an interface but give the byte array nonsense
+// instead.
+func copyf(to []float32, from []byte) {
+  //cfloat := C.castf((unsafe.Pointer)(from))
+  const SIZEOF_F32 = 4
+  hdr := *(*reflect.SliceHeader)(unsafe.Pointer(&from))
+  hdr.Len /= SIZEOF_F32
+  hdr.Cap /= SIZEOF_F32
+  data := *(*[]float32)(unsafe.Pointer(&hdr))
+  if hdr.Len != len(to) {
+    log.Fatalf("data is %d elems, target is %d elems", hdr.Len, len(to))
   }
-  fmt.Printf("copying %d elements...\n", len(from)/4)
-
-  for i:=0 ; i < len(from); i += 4 {
-    bits := binary.LittleEndian.Uint32(from[i:])
-    to[i/4] = math.Float32frombits(bits)
-  }
+  copy(to, data)
 }
 
 // runs a program, replacing every 'malloc' in a program with
@@ -814,9 +817,9 @@ func mallocs(argv []string) {
           if err := inferior.Read(vm.alloc.base, tmp) ; err != nil {
             log.Fatalf("could not read inferior's data: %v\n", err)
           }
-          // we need this gross tmp/copyf8 pair because our inferior.Read
-          // takes a []byte instead of an interface{} ... :-(
-          copyf8(vm.data, tmp)
+          // we need this gross 'copyf' because our inferior.Read
+          // takes a []byte instead of an interface{}, so we can't cast :-(
+          copyf(vm.data, tmp)
           mx := maxf(vm.data)
           fmt.Printf("datamax: %f\n", mx)
           vm.gsfield.Render(vm.data, vm.dims, mx)
