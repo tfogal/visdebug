@@ -1,4 +1,4 @@
-package main;
+package main
 
 import(
   "bufio"
@@ -27,6 +27,8 @@ import(
 
 // for information regarding code injection
 var inject = msg.StdChan()
+// progress / status of what's going on with memory protection.
+var protection = msg.StdChan()
 
 func procstatus(pid int, stat syscall.WaitStatus) {
   if stat.CoreDump() { log.Fatalf("core dumped"); }
@@ -365,9 +367,8 @@ func (asm x86_64) RetAddr(inferior *ptrace.Tracee) uintptr {
   if err := inferior.Read(iptr, insn) ; err != nil {
     log.Fatalf("could not read current (0x%x) instruction: %v\n", iptr, err)
   }
-  // yes, I do this so much that I know cold turkey that 0x55 is the machine
-  // code for the "push %rbp" mnemonic.
-  // Likewise, 0xc3 is the mnemonic for "ret"
+  // 0x55 is the machine code for 'push %rbp'.
+  // 0xc3 is the machine code for 'ret'.
   if 0x55 == insn[0] || 0xc3 == insn[0] {
     return asm.RetAddrTop(inferior)
   }
@@ -533,14 +534,14 @@ func iprotect(inferior *ptrace.Tracee, addr uintptr, len uint,
     return fmt.Errorf("did not return to target 0x%0x: %v", rettarget, err)
   }
 
-  fmt.Printf("[go] %d on 0x%0x--0x%0x. ", prot, addr, addr+uintptr(len))
+  protection.Trace("%d on 0x%0x--0x%0x. ", prot, addr, addr+uintptr(len))
   // I'm so hilarious:
-  fmt.Println("Now back to your regularly scheduled programming.")
+  protection.Trace("Now back to your regularly scheduled programming.")
   if err := inferior.SetRegs(orig_regs) ; err != nil { // restore registers.
     return err
   }
-  fmt.Printf("[go] restoring SP: 0x%x -> 0x%08x @ 0x%x\n", rettarget, oretaddr,
-             uintptr(orig_regs.Rsp))
+  protection.Trace("restoring SP: 0x%x -> 0x%08x @ 0x%x\n", rettarget,
+                   oretaddr, uintptr(orig_regs.Rsp))
   if err := inferior.WriteWord(uintptr(orig_regs.Rsp), oretaddr) ; err != nil {
 
     return err
@@ -737,14 +738,12 @@ func mallocs(argv []string) {
   }
   var access maccess
 
-  fmt.Printf("pre-ctx ...\n")
   // establish our OGL stuff.
   gfx.Context()
   defer gfx.Close()
 
   updates := uint(0)
 
-  fmt.Printf("ctx established, moving on...\n")
   var vm visualmem
   vmem := make([]visualmem, 0)
   for {
@@ -796,7 +795,7 @@ func mallocs(argv []string) {
         vm.data = make([]float32, vm.alloc.length/uint(unsafe.Sizeof(f32)))
         vmem = append(vmem, vm)
       } else if iev.iptr == access.bp.Address { // done w/ fqn that needs allow
-        fmt.Printf("[go] hit access BP @ 0x%x\n", iev.iptr)
+        protection.Trace("hit access BP @ 0x%x\n", iev.iptr)
         if err := debug.Unbreak(inferior, access.bp) ; err != nil {
           log.Fatalf("could not remove access BP: %v\n", err)
         }
@@ -812,8 +811,6 @@ func mallocs(argv []string) {
           // todo/bad: don't use 'vm' here, that assumes the most recent memory
           // is the one of interest here, which might not be true.
           tmp := make([]byte, vm.dims[0]*vm.dims[1]*4)
-          fmt.Printf("reading 0x%x--0x%x\n", vm.alloc.base,
-                     vm.alloc.base+uintptr(len(tmp)))
           if err := inferior.Read(vm.alloc.base, tmp) ; err != nil {
             log.Fatalf("could not read inferior's data: %v\n", err)
           }
@@ -821,7 +818,6 @@ func mallocs(argv []string) {
           // takes a []byte instead of an interface{}, so we can't cast :-(
           copyf(vm.data, tmp)
           mx := maxf(vm.data)
-          fmt.Printf("datamax: %f\n", mx)
           vm.gsfield.Render(vm.data, vm.dims, mx)
         }
         updates++
@@ -838,10 +834,9 @@ func mallocs(argv []string) {
       if err != nil {
         log.Fatalf("no iptr: %v\n", err)
       }
-      fmt.Printf("[go] 0x%x accessed allocation 0x%0x--0x%0x (0x%0x)\n", iptr,
-                 alc.begin(), alc.end(), iev.addr)
-
-      fmt.Printf("[go] will allow it and then return to 0x%0x.\n", iptr)
+      protection.Trace("accessed allocation 0x%0x--0x%0x (0x%0x)\n" +
+                       "Allowing it and returning to 0x%0x\n",
+                       alc.begin(), alc.end(), iev.addr, iptr)
       if err := inferior.ClearSignal() ; err != nil {
         log.Fatalf("could not clear segv: %v\n", err)
       }
@@ -858,7 +853,8 @@ func mallocs(argv []string) {
       if err != nil {
         log.Fatalf("could not find RET starting from 0x%0x\n", iptr)
       }
-      fmt.Printf("[go] inserting access/RETQ bp at 0x%0x\n", ret)
+      protection.Trace("inserting BP at 0x%0x so we can re-enable " +
+                       "memory protection.\n", ret)
 
       access.bp, err = debug.Break(inferior, ret)
       if err != nil {
@@ -872,7 +868,6 @@ func mallocs(argv []string) {
         // a loop, or e.g. as calloc does.
         continue
       }
-      fmt.Printf("[go] found dims of %v\n", dims)
       vm.dims = dims
     default:
       log.Fatalf("unhandled event type: %v\n", iev)
@@ -889,8 +884,6 @@ func bounds(program string, inferior *ptrace.Tracee) ([]uint, error) {
   if err != nil {
     log.Fatalf("Cannot find where we are: %v", err)
   }
-  fmt.Printf("we think are at: %s (0x%0x)\n", symbol.Name(),
-             symbol.Address())
   if strings.Contains(symbol.Name(), "@@") {
     // then it's a C library function, don't bother, it's probably
     // calloc or something.
