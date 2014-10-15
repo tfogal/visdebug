@@ -133,5 +133,6 @@ main(int argc, char* argv[]) {
   while(relax(data, n, tolerance)) ;
 
   write_field(data, n, outfn);
+  free(data);
   return 0;
 }
