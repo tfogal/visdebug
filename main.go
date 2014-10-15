@@ -117,6 +117,8 @@ func main() {
     defer pprof.StopCPUProfile()
   }
 
+  globals = CmdGlobal{program: argv[0]}
+
   if symlist {
     readsymbols(argv[0]);
   }
