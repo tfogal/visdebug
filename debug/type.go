@@ -157,7 +157,7 @@ func function(entry *dwarf.Entry) string {
 func searchfor(program string, target dwarfEntry) (*dwarf.Entry, error) {
   legolas, err := elf.Open(program)
   if err != nil {
-    return nil, fmt.Errorf("legolas failed us: %v", err)
+    return nil, fmt.Errorf("legolas failed opening '%s': %v", program, err)
   }
   gimli, err := legolas.DWARF()
   if err != nil {
