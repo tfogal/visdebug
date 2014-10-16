@@ -306,6 +306,7 @@ func MainSync(program string, inferior *ptrace.Tracee) error {
 // Thus we use uint64's often, here, and expect users to cast.
 type StackReader interface {
   Arg1(*ptrace.Tracee) uint64
+  SetArg1(*ptrace.Tracee, uint64) error
   RetAddr(*ptrace.Tracee) uintptr
   RetVal(*ptrace.Tracee) uint64
 }
@@ -316,6 +317,14 @@ func (x86_64) Arg1(inferior *ptrace.Tracee) uint64 {
   regs, err := inferior.GetRegs()
   if err != nil { log.Fatalf(err.Error()) }
   return regs.Rdi
+}
+func (x86_64) SetArg1(inferior *ptrace.Tracee, value uint64) error {
+  regs, err := inferior.GetRegs()
+  if err != nil {
+    return err
+  }
+  regs.Rdi = value
+  return inferior.SetRegs(regs)
 }
 // in the x86-64 ABI, calling a function places the return address on the
 // stack, and the RSP register points to that stack location.  So, essentially,
@@ -480,6 +489,11 @@ const (
 // you only care for the side effect, use the current instruction ptr.
 func iprotect(inferior *ptrace.Tracee, addr uintptr, len uint,
               prot uint64, rettarget uintptr) error {
+  // We really should only be protecting pages.  We cannot really ensure that
+  // the memory is for a single purpose, if we don't page-align everything.
+  if uint64(addr) % 4096 != 0 || len % 4096 != 0 {
+    return errors.New("memory is not page-aligned.")
+  }
   symbols, err := bfd.SymbolsProcess(inferior)
   if err != nil {
     return err
@@ -566,15 +580,21 @@ func deny(inferior *ptrace.Tracee, addr uintptr, len uint,
 }
 
 // An allocation that the inferior has performed.
+// To make sure we don't get shared pages (multiple allocations on one page),
+// we modify allocations to make sure they always start and end on page
+// boundaries.  'length' and 'lpage' track the "user" allocation and the
+// page-aligned end of allocation.
 type allocation struct {
-  base uintptr
-  length uint
+  base uintptr // the base address of the allocation
+  length uint  // the length (bytes) of the allocation the user requested
+  lpage uint64 // length (bytes) of our 'extended' version.  always
+               // page-aligned, and always >= length.
 }
 // some convenience accessors because we care about the range so often.
 func (a allocation) begin() uintptr { return a.base }
-func (a allocation) end() uintptr { return a.base+uintptr(a.length) }
+func (a allocation) end() uintptr { return a.base+uintptr(a.lpage) }
 func (a allocation) String() string {
-  return fmt.Sprintf("alloc(%d) -> 0x%08x", a.length, a.base)
+  return fmt.Sprintf("alloc(%d[%d]) -> 0x%08x", a.length, a.lpage, a.base)
 }
 
 func find_alloc(vmem []visualmem, addr uintptr) (allocation, error) {
@@ -590,6 +610,7 @@ func find_alloc(vmem []visualmem, addr uintptr) (allocation, error) {
 // Inserts a breakpoint at the exit to the current function.
 func breakexit(inferior *ptrace.Tracee) (debug.Breakpoint, error) {
   var stk x86_64
+  fmt.Printf("inserting BP @ exit.\n")
   retsite := stk.RetAddr(inferior)
 
   bp, err := debug.Break(inferior, retsite)
@@ -628,6 +649,16 @@ func ihandle(inferior *ptrace.Tracee) (ievent, error) {
     if err != nil {
       return nil, err
     }
+    symb, err := where(inferior)
+    if err != nil {
+      return nil, err
+    }
+    iptr, err := inferior.GetIPtr()
+    if err != nil {
+      return nil, err
+    }
+    protection.Trace("segfault at %s+%d\n", symb.Name(), iptr-symb.Address())
+
     return segfault{addr: sig.Addr}, nil
   case status.StopSignal() == syscall.SIGTRAP:
     // back up once so the trap iptr makes sense and we can restart our insn
@@ -677,6 +708,10 @@ type visualmem struct {
   data []float32
   dims []uint
   alloc allocation
+}
+
+func (v visualmem) String() string {
+  return fmt.Sprintf("visual mem: %v %v", v.alloc, v.dims)
 }
 
 // disgusting function to copy from a byte-slice-of-floats to an
@@ -762,10 +797,22 @@ func mallocs(argv []string) {
       if iev.iptr == symmalloc.Address() { // hit malloc.
         // record the size of the alloc.
         vm.alloc.length = uint(stk.Arg1(inferior))
+        vm.alloc.lpage = uint64(vm.alloc.length)
 
         // remove the BP
         if err := debug.Unbreak(inferior, mallocbp) ; err != nil {
           log.Fatalf("could not remove malloc BP: %v\n", err)
+        }
+
+        // "upgrade" the size of the allocation so that it always ends on a
+        // page boundary.
+        if ((4096-1) & vm.alloc.length) != 0 {
+          vm.alloc.lpage = uint64(int64(vm.alloc.length + 4096) & ^(4096-1))
+          inject.Trace("upgrading %d-byte allocation to %d bytes\n",
+                       uint(stk.Arg1(inferior)), vm.alloc.lpage)
+          if err := stk.SetArg1(inferior, vm.alloc.lpage) ; err != nil {
+            log.Fatalf("could not bump up allocation size: %v\n", err)
+          }
         }
 
         if err := inferior.SetIPtr(tjfmalloc); err != nil {
@@ -789,6 +836,11 @@ func mallocs(argv []string) {
           log.Fatalf("could not re-insert malloc bp: %v\n", err)
         }
 
+        // reset the correct argument, in case it's reused for something else
+        if err := stk.SetArg1(inferior, uint64(vm.alloc.length)) ; err != nil {
+          log.Fatalf("error resetting malloc size argument: %v\n", err)
+        }
+
         vm.alloc.base = uintptr(stk.RetVal(inferior))
         fmt.Printf("[go] %v @ 0x%x\n", vm.alloc, iev.iptr)
         vm.gsfield = gfx.ScalarField2D()
@@ -803,7 +855,8 @@ func mallocs(argv []string) {
         }
         access.bp.Address = 0x0 // make sure it's not re-used.
 
-        err := deny(inferior, access.alloc.base, access.alloc.length, iev.iptr)
+        err := deny(inferior, access.alloc.base, uint(access.alloc.lpage),
+                    iev.iptr)
         if err != nil {
           log.Fatalf("could not revoke perms for: %v\n", err)
         }
@@ -828,6 +881,8 @@ func mallocs(argv []string) {
       var stk x86_64
       alc, err := find_alloc(vmem, iev.addr)
       if err != nil {
+        fmt.Printf("searching for alloc in %d-elem list (%v)\n", len(vmem), err)
+        fmt.Printf("alloc list: %v\n", vmem)
         rs := stk.RetAddr(inferior)
         log.Fatalf("alloc not found in %d-elem list\ninferior SIGSEGV'd at:" +
                    "0x%0x -> 0x%0x\n", len(vmem), iev.addr, rs)
@@ -842,25 +897,31 @@ func mallocs(argv []string) {
       if err := inferior.ClearSignal() ; err != nil {
         log.Fatalf("could not clear segv: %v\n", err)
       }
-      if err := allow(inferior, alc.base, alc.length, iptr) ; err != nil {
+      protection.Trace("signal cleared\n")
+      if err := allow(inferior, alc.base, uint(alc.lpage), iptr) ; err != nil {
         log.Fatalf("could not allow 0x%0x: %v\n", alc.base, err)
       }
       access.alloc = alc
 
-      // Search for the 'RET' and insert a BP that we will use to re-enable the
-      // memory protection (and thereby detect subsequent accesses).
-      // todo/fixme: We should probably search from the start of the function,
-      // not from 'rs'.
-      ret, err := find_opcode(x86asm.RET, inferior, iptr)
-      if err != nil {
-        log.Fatalf("could not find RET starting from 0x%0x\n", iptr)
-      }
-      protection.Trace("inserting BP at 0x%0x so we can re-enable " +
-                       "memory protection.\n", ret)
+      protection.Trace("Access was allowed. Now searching for a place to " +
+                       "insert a breakpoint to re-enable memory protection.")
 
-      access.bp, err = debug.Break(inferior, ret)
+      // Our logic for Top vs. Mid in RetAddr is invalid in this case: we
+      // *know* we're at the start of the fqn (we just hit a BP!), but the
+      // current instruction is unlikely to be a 'push' or 'ret'---in fact,
+      // it's basically guaranteed not to be, since we've likely paused at
+      // some @plt symbol, and those do not perform normal ABI stack handling.
+      raddr := stk.RetAddrTop(inferior)
+      access.bp, err = debug.Break(inferior, raddr)
       if err != nil {
-        log.Fatalf("could not insert 0x%0x bp: %v\n", ret, err)
+        protection.Trace("can't find retaddr from insn 0x%0x: %v\n", raddr, err)
+        protection.Trace("Will attempt to find a RET insn, instead.\n")
+
+        access.bp, err = break_ret(inferior)
+        if err != nil {
+          log.Fatalf("could not find a place to re-enable memory protection!" +
+                     "%v\n", err)
+        }
       }
 
       dims, err := bounds(argv[0], inferior)
@@ -879,6 +940,32 @@ func mallocs(argv []string) {
     v.gsfield.Post()
   }
   fmt.Printf("[go] inferior (%d) terminated.\n", inferior.PID())
+}
+
+// Find the function's 'ret' instruction and insert a breakpoint there.
+// It seems like this will fail if the function has multiple exit points.  I
+// think we haven't hit that problem yet because compilers tend to structure
+// all functions to essentially have a 'goto cleanup:' and then a single point
+// of exit.  But there is, of course, no reason the compiler *needs* to do it
+// this way.
+// We should revisit this to be able to insert a breakpoint at *all* RET
+// instructions within a function.  Better, we should have a separate function
+// that identifies the list of all RETs within a function, and then functions
+// which take such a list and enables/disables them.
+func break_ret(inferior *ptrace.Tracee) (debug.Breakpoint, error) {
+  symb, err := where(inferior)
+  if err != nil {
+    log.Fatalf("don't know where we are: %v\n", err)
+  }
+  // Search for the 'RET' as a location to insert our BP.
+  ret, err := find_opcode(x86asm.RET, inferior, symb.Address())
+  if err != nil {
+    log.Fatalf("could not find RET starting from 0x%0x\n", symb.Address())
+  }
+  protection.Trace("inserting BP at 0x%0x so we can re-enable " +
+                   "memory protection.\n", ret)
+
+  return debug.Break(inferior, ret)
 }
 
 func bounds(program string, inferior *ptrace.Tracee) ([]uint, error) {
