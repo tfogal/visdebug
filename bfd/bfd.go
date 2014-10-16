@@ -407,8 +407,5 @@ func SymbolsProcess(inferior *ptrace.Tracee) ([]Symbol, error) {
     if lmap_addr == 0x0 { break }
   }
   sort.Sort(SymList(symbols))
-  /*for i:=0; i < len(symbols); i++ {
-    fmt.Printf("\t%30s 0x%12x\n", symbols[i].name, symbols[i].addr)
-  }*/
   return symbols, nil
 }
