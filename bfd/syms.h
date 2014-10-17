@@ -13,13 +13,12 @@ typedef struct _symtable {
 } symtable_t;
 
 typedef long(rdinf)(void* into, size_t n, size_t offset);
-symtable_t* read_symtab(rdinf* rd);
-symtable_t* read_symtab_procread();
-void setprocfd(int x);
-void free_symtable(symtable_t* sym);
 PURE size_t Elf64_Dynsz();
 PURE size_t Elf64_Sxwordsz();
-PURE size_t rmap_offset();
-PURE uintptr_t uintptr(const void*);
 PURE size_t lmap_lname_offset();
 PURE size_t lmap_lnext_offset();
+void free_symtable(symtable_t* sym);
+symtable_t* read_symtab_procread();
+PURE size_t rmap_offset();
+void setprocfd(int x);
+PURE uintptr_t uintptr(const void*);

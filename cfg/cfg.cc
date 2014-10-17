@@ -1,7 +1,7 @@
 // Various routines for building the CFG using DynInst.
 // Note that we use C allocation routines all over the place, here, because
-// we want to pass memory we create to other languages and it's way easier to
-// call 'free' than 'delete' from other languages.
+// we want to pass the memory we create to other languages and it's way easier
+// to call 'free' than 'delete' from other languages.
 #include <cassert>
 #include <cerrno>
 #include <cinttypes>
@@ -12,7 +12,6 @@
 #include <unordered_map>
 #include <vector>
 #include "CodeObject.h"
-#include "CFG.h"
 #include "compiler.h"
 #include "gocfg.h"
 
@@ -23,6 +22,8 @@ using namespace ParseAPI;
 static void printdot(const char* program);
 static void print_nodes(const struct node* nds, size_t nodes);
 static void free_nodes(struct node* nds, size_t nodes);
+static struct node* cfgLocal(const char* program, const char* function,
+                             size_t* n_nodes);
 /* should the program filter out C library/other uninteresting functions? */
 static bool filter = false;
 /* produce a dot-format output instead of a default custom output? */
@@ -254,23 +255,6 @@ cfg(const char* program, size_t* n_nodes)
   return cfg_filter(program, f, n_nodes);
 }
 
-// Like 'cfg' but only builds the CFG for a local graph.
-EXTC struct node*
-cfgLocal(const char* program, const char* function, size_t* n_nodes)
-{
-  // This is unfortunately not great; we just create a predicate that
-  // matches the name of the function that DynInst finds.  So, DynInst
-  // is probably still *building* the full CFG for basic blocks outside
-  // the given function, and we're just filtering it out.  Oh well, we
-  // acquiesce for now, since there doesn't seem to be a way around it
-  // without hacking DynInst.
-  std::function<bool(Function*)> f = [&](Function* fqn) {
-    return internalfqn(fqn) ||
-           fqn->name().find(std::string(function)) == std::string::npos;
-  };
-  return cfg_filter(program, f, n_nodes);
-}
-
 EXTC struct node*
 cfg_address(const char* program, const uintptr_t address, size_t* nnodes)
 {
@@ -297,12 +281,29 @@ cfg_address(const char* program, const uintptr_t address, size_t* nnodes)
 }
 
 #ifdef MAIN
+// Like 'cfg' but only builds the CFG for a local graph.
+static struct node*
+cfgLocal(const char* program, const char* function, size_t* n_nodes)
+{
+  // This is unfortunately not great; we just create a predicate that
+  // matches the name of the function that DynInst finds.  So, DynInst
+  // is probably still *building* the full CFG for basic blocks outside
+  // the given function, and we're just filtering it out.  Oh well, we
+  // acquiesce for now, since there doesn't seem to be a way around it
+  // without hacking DynInst.
+  std::function<bool(Function*)> f = [&](Function* fqn) {
+    return internalfqn(fqn) ||
+           fqn->name().find(std::string(function)) == std::string::npos;
+  };
+  return cfg_filter(program, f, n_nodes);
+}
+
 /* functions to remove/ignore. */
 static const std::array<std::string,7> ignored = {
   "atoi", "deregister_tm_clones", "fwrite", "frame_dummy", "printf", //"puts",
   "register_tm_clones"
 };
-void
+static void
 printdot(const char* program)
 {
   std::map<Address, bool> seen;

@@ -11,7 +11,7 @@ func TestBuildDimensional(t *testing.T) {
 
 func TestBuildDimensionalMain(t *testing.T) {
   full := Build("../testprograms/dimensional")
-  main := Local("../testprograms/dimensional", "main")
+  main := FromAddress("../testprograms/dimensional", 0x400ea7)
 
   if len(main) >= len(full) {
     t.Fatalf("should be *far* fewer symbols in main(%d) than in the whole" +

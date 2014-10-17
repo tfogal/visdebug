@@ -1,5 +1,5 @@
 // This is not 'config', but rather 'c'ontrol 'f'low 'g'raph.
-package cfg;
+package cfg
 // #include <stdlib.h>
 // #include "gocfg.h"
 // #cgo CXXFLAGS: -std=c++11
@@ -119,20 +119,6 @@ func Build(program string) map[uintptr]*Node {
   progname := C.CString(program);
   ccfg := C.cfg(progname, &c_nnodes);
   defer C.free(unsafe.Pointer(progname))
-  nnodes := uint(c_nnodes)
-  return go_graph(ccfg, nnodes)
-}
-
-// Computes the LOCAL (to a function) control flow graph.
-// todo: return a single node? a single function should only have one entry.
-// Note that this memleaks a bit (C++ lib is broken)!  Do not call in a loop.
-func Local(program string, function string) map[uintptr]*Node {
-  var c_nnodes C.size_t
-  progname := C.CString(program);
-  funcname := C.CString(function)
-  ccfg := C.cfgLocal(progname, funcname, &c_nnodes)
-  defer C.free(unsafe.Pointer(progname))
-  defer C.free(unsafe.Pointer(funcname))
   nnodes := uint(c_nnodes)
   return go_graph(ccfg, nnodes)
 }

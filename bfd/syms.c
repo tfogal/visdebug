@@ -29,7 +29,6 @@
 #include <unistd.h>
 #include "debug.h"
 #include "syms.h"
-#include "wrapbfd.h"
 #include "../cfg/compiler.h"
 
 DECLARE_CHANNEL(headers);
@@ -60,163 +59,9 @@ valid_header(const Elf64_Ehdr* ehdr) {
   return ehdr->e_ident[0] == 0x7f && ehdr->e_ident[1] == 'E' &&
          ehdr->e_ident[2] == 'L' && ehdr->e_ident[3] == 'F';
 }
-static bool
-valid_pheader(const Elf64_Phdr* phdr) {
-  switch(phdr->p_type) {
-    case PT_NULL: puts("unused phdr"); break;
-    case PT_LOAD: puts("loadable seg"); break;
-    case PT_DYNAMIC: puts("dynamic linking tables"); break;
-    case PT_INTERP: puts("interp"); break;
-    case PT_NOTE: puts("note"); break;
-    case PT_SHLIB: puts("shared lib"); break;
-    case PT_PHDR: puts("program header table"); break; /* wtf? */
-    case PT_LOOS: case PT_HIOS: case PT_LOPROC: case PT_HIPROC:
-      puts("env/proc specific"); break;
-    default:
-      fprintf(stderr, "Unkwown phdr type %d\n", phdr->p_type);
-      return false;
-  }
-  if(phdr->p_flags & PF_X) { puts("ph executable"); }
-  if(phdr->p_flags & PF_W) { puts("writable"); }
-  if(phdr->p_flags & PF_R) { puts("readable"); }
-  return true;
-}
-static void
-print_sec(const Elf64_Shdr hdr) {
-  printf("sec hdr: %d, ", hdr.sh_name);
-  switch(hdr.sh_type) {
-    case SHT_NULL: printf("unused"); break;
-    case SHT_PROGBITS: printf("program"); break;
-    case SHT_SYMTAB: printf("symbol table"); break;
-    case SHT_STRTAB: printf("string table"); break;
-    case SHT_RELA: printf("rel 'a' relocations"); break;
-    case SHT_HASH: printf("symbol hash table"); break;
-    case SHT_DYNAMIC: printf("dynamic linking tables"); break;
-    case SHT_NOTE: printf("note info"); break;
-    case SHT_NOBITS: printf("uninitialized data"); break;
-    case SHT_REL: printf("normal/standard relocations"); break;
-    case SHT_SHLIB: printf("'shlib', i.e. reserved"); break;
-    case SHT_DYNSYM: printf("dynamic symbol table"); break;
-    case SHT_LOOS: case SHT_HIOS: case SHT_LOPROC: case SHT_HIPROC:
-      printf("env/proc specific"); break;
-  }
-  printf("\n");
-}
-/* addr is the address of the first header */
-static void
-print_section_headers(const uintptr_t addr, const size_t nhdrs, pid_t pid) {
-  printf("printing %zu section headers\n", nhdrs);
-  for(size_t i=0; i < nhdrs; ++i) {
-    Elf64_Shdr shdr;
-    const uintptr_t nxt = addr + i*sizeof(Elf64_Shdr);
-    if(read_inferior(&shdr, nxt, sizeof(Elf64_Shdr), pid) != 0) {
-      perror("reading sec hdr");
-      return;
-    }
-    print_sec(shdr);
-  }
-}
-
-/** @param dynsection address of the dynamic section */
-MALLOC static Elf64_Dyn*
-find_got(pid_t inferior, const uintptr_t dynsection) {
-  Elf64_Dyn* dyn = malloc(sizeof(Elf64_Dyn));
-  dyn->d_tag = -1;
-  _Static_assert(-1 != DT_NULL, "loop will not work, otherwise");
-  for(size_t i=0; dyn->d_tag != DT_NULL; ++i) {
-    const size_t dsz = sizeof(Elf64_Dyn);
-    if(read_inferior(dyn, dynsection+i*dsz, dsz, inferior)) {
-      perror("reading Elf64_Dyn from inferior.");
-      free(dyn);
-      return NULL;
-    }
-    if(dyn->d_tag == DT_PLTGOT) {
-      return dyn;
-    }
-  }
-  free(dyn);
-  return NULL;
-}
-
-static void
-section_names(pid_t inferior, const uintptr_t startsec) {
-  Elf64_Dyn* dyn = malloc(sizeof(Elf64_Dyn));
-  dyn->d_tag = -1;
-  _Static_assert(-1 != DT_NULL, "loop will not work, otherwise");
-  for(size_t i=0; dyn->d_tag != DT_NULL; ++i) {
-    const size_t dsz = sizeof(Elf64_Dyn);
-    if(read_inferior(dyn, startsec+i*dsz, dsz, inferior)) {
-      fprintf(stderr, "error reading Elf64_Dyn at iter %zu: %d\n", i, errno);
-      free(dyn);
-      return;
-    }
-    printf("dynamic %zu: ", i);
-    switch(dyn->d_tag) {
-      case DT_NULL: puts("end."); break;
-      case DT_NEEDED: puts("needed."); break;
-      case DT_PLTRELSZ: puts("plt relative sz"); break;
-      case DT_PLTGOT:
-        printf("PLT GOT address: 0x%0lx\n", dyn->d_un.d_ptr);
-        break;
-      case DT_HASH: puts("addr of symbol hash table"); break;
-      case DT_STRTAB: puts("addr of dynamic string table"); break;
-      case DT_SYMTAB: puts("addr of dynamic symtab"); break;
-      case DT_RELA: puts("addr of relocA table"); break;
-      case DT_RELASZ: puts("size (bytes) of DT_RELA table."); break;
-      case DT_RELAENT: puts("size (bytes) per DT_RELA entry"); break;
-      case DT_STRSZ: puts("size (bytes) of string table"); break;
-      case DT_SYMENT: puts("size (bytes) per symtab entry"); break;
-      case DT_INIT: puts("addr of init function"); break;
-      case DT_FINI: puts("addr of termination function"); break;
-      case DT_SONAME: puts("string table offset of (this) .so name"); break;
-      case DT_RPATH: puts("string table offset of rpath"); break;
-      case DT_SYMBOLIC: puts("symbolic [ignored!]"); break;
-      case DT_REL: puts("addr of reloc table"); break;
-      case DT_RELSZ: puts("size (bytes) of reloc table"); break;
-      case DT_RELENT: puts("size(bytes) of each reloc entry"); break;
-      case DT_PLTREL: puts("type of reloc for proc linkage table (should be "
-                           "DT_REL or DT_RELA)"); break;
-      case DT_DEBUG:
-        puts("reserved for debugger."); break;
-      case DT_TEXTREL: puts("reloc table has relocs for RO segment"); break;
-      case DT_JMPREL: puts("addr of relocs for PLT"); break;
-      case DT_BIND_NOW: puts("early binds"); break;
-      case DT_INIT_ARRAY: puts("init array"); break;
-      case DT_FINI_ARRAY: puts("finish array"); break;
-      case DT_INIT_ARRAYSZ: puts("init array size(bytes)"); break;
-      case DT_FINI_ARRAYSZ: puts("finish array size (bytes)"); break;
-      default: printf("unknown (0x%x)\n", (int)dyn->d_tag); break;
-    }
-  }
-  free(dyn);
-}
-
-static void
-read_process_bfd(const char* fn, pid_t chld) {
-  bfd* template = bfd_openr(fn, NULL);
-  if(template == NULL) {
-    fprintf(stderr, "could not create template BFD\n");
-    return;
-  }
-  bfd* lib = bfd_from_inferior(template, 0x0, chld);
-  if(lib == NULL) {
-    fprintf(stderr, "error creating BFD from inferior.\n");
-    if(bfd_close(template) == FALSE) {
-      fprintf(stderr, "error closing template BFD...\n");
-    }
-    return;
-  }
-  if(bfd_close(lib) == FALSE) {
-    fprintf(stderr, "error closing from-memory BFD\n");
-  }
-  if(bfd_close(template) == FALSE) {
-    fprintf(stderr, "error closing template BFD...\n");
-  }
-}
-
 
 typedef long(rdinf)(void* into, size_t n, size_t offset);
-symtable_t* read_symtab(rdinf* rd);
+static symtable_t* read_symtab(rdinf* rd);
 
 /* Copy LEN bytes from inferior's memory starting at MEMADDR
    to debugger memory starting at MYADDR.  */
@@ -233,8 +78,6 @@ linux_read_memory(unsigned long memaddr, unsigned char *myaddr, size_t len,
   /* Try using /proc first. */
   ssize_t bytes;
 
-  /* We could keep this file open and cache it - possibly one per
-     thread.  That requires some juggling, but is even faster.  */
   char filename[64];
   snprintf(filename, 64, "/proc/%d/mem", (int)pid);
   int fd = open(filename, O_RDONLY | O_LARGEFILE);
@@ -387,7 +230,7 @@ free_symtable(symtable_t* sym) {
   free(sym);
 }
 
-symtable_t*
+static symtable_t*
 read_symtab(rdinf* rd) {
   if(rd == procread) { assert(procfd != -1); }
 
@@ -484,13 +327,6 @@ symcompar(const void* a, const void* b) {
   return strcmp(sa->name, sb->name);
 }
 
-static void
-printsyms(const symtable_t* sym) {
-  for(size_t i=0; i < sym->n; ++i) {
-    printf("\t sym %2zu: %30s 0x%0lx\n", i, sym->bols[i].name,
-           sym->bols[i].address);
-  }
-}
 const symbol*
 find_symbol(const char* name, const symtable_t* sym) {
   for(size_t i=0; i < sym->n; ++i) {
@@ -527,22 +363,6 @@ relocate_symbols(symtable_t* sym, const uintptr_t offset) {
   }
 }
 
-static symtable_t*
-merge_symtables(const symtable_t* a, const symtable_t* b) {
-  symtable_t* merged = malloc(sizeof(symtable_t));
-  merged->n = a->n + b->n;
-  merged->bols = calloc(merged->n, sizeof(symbol));
-  for(size_t i=0; i < a->n; ++i) {
-    merged->bols[i].name = strdup(a->bols[i].name);
-    merged->bols[i].address = a->bols[i].address;
-  }
-  for(size_t i=0; i < b->n; ++i) {
-    merged->bols[i+a->n].name = strdup(b->bols[i].name);
-    merged->bols[i+a->n].address = b->bols[i].address;
-  }
-  qsort(merged->bols, merged->n, sizeof(symbol), symcompar);
-  return merged;
-}
 /* When an executable calls a function in a library, that library symbol
  * appears in the executable.  Of course, the linker has no idea where that
  * library symbol will be at runtime, so it gives the symbol an address of 0x0

@@ -27,9 +27,15 @@
 #include <sys/user.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include "../bfd.h"
 #include "../syms.h"
-#include "../wrapbfd.h"
 #include "../../cfg/compiler.h"
+
+size_t symtabsz(bfd* b);
+size_t nsyms(bfd* b, int dynamic, asymbol** syms, unsigned* sz);
+asymbol** readsyms(bfd* b, unsigned* sz);
+uintptr_t addr(const asymbol* sym);
+bfd* bfd_from_inferior(bfd* template, uintptr_t vma, pid_t pid);
 
 static pid_t inferior_pid = 0;
 static void
@@ -198,8 +204,6 @@ main(int argc, char *argv[]) {
     free_symtable(libsym);
     free_lmap(lmap);
   } while(lmaddr);
-
-  /* printsyms(procsym); */
 
   { const symbol* sympause = find_symbol("pause", procsym);
     if(sympause != NULL) {

@@ -20,12 +20,10 @@ struct node {
   uintptr_t addr;
   const char* name;   /* may be null. */
   struct edge* edgelist; /* dynamically allocated. */
-  size_t edges;
+  size_t edges; /* number of elements in the 'edgelist' array. */
 };
 
 EXTC struct node* cfg(const char* program, size_t* n_nodes);
-EXTC struct node* cfgLocal(const char* program, const char* function,
-                           size_t* n_nodes);
 // computes the CFG starting from a given address, which should be the
 // entry address of a function.
 EXTC struct node* cfg_address(const char* program, const uintptr_t address,
