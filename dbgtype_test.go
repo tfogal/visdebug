@@ -10,7 +10,7 @@ import "github.com/tfogal/ptrace"
 import "code.google.com/p/rsc.x86/x86asm"
 
 func init() {
-  globals = CmdGlobal{"testprograms/dimensional"}
+  globals = CmdGlobal{"testprograms/dimensional", nil}
 }
 
 func TestDimsType(t *testing.T) {

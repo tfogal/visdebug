@@ -23,20 +23,19 @@ import "./debug"
 import "./msg"
 
 type CmdGlobal struct {
-  program string
+  program string // the filename for the program we are running
+  symbols []bfd.Symbol // the list of symbols from the process
 }
 
-// the list of symbols from the process, might be nil.
-var symbols []bfd.Symbol
 // initialization info that commands might want to use.
 var globals CmdGlobal
 // logging type information
 var typeinfo = msg.StdChan()
 
 func verify_symbols_loaded(inferior *ptrace.Tracee) error {
-  if symbols == nil {
+  if globals.symbols == nil {
     var err error // so we can use "=" and ensure 'symbols' is the global.
-    symbols, err = bfd.SymbolsProcess(inferior)
+    globals.symbols, err = bfd.SymbolsProcess(inferior)
     if err != nil { return err }
   }
   return nil
@@ -132,10 +131,10 @@ func (c cwait) Execute(inferior *ptrace.Tracee) (error) {
     if saddr < 0 { panic("address cannot be negative, that makes no sense.") }
     address = uintptr(saddr)
   } else {
-    sym := symbol(c.funcname, symbols) // symbol lookup
+    sym := symbol(c.funcname, globals.symbols) // symbol lookup
     if sym == nil {
       return fmt.Errorf("could not find '%s' among the %d known symbols.",
-                        c.funcname, len(symbols))
+                        c.funcname, len(globals.symbols))
     }
     address = sym.Address()
   }
@@ -196,10 +195,10 @@ func (c csymbol) Execute(inferior *ptrace.Tracee) (error) {
   if err := verify_symbols_loaded(inferior) ; err != nil {
     return err
   }
-  sym := symbol(c.symname, symbols) // symbol lookup
+  sym := symbol(c.symname, globals.symbols) // symbol lookup
   if sym == nil {
     return fmt.Errorf("could not find '%s' among the %d known symbols.",
-                      c.symname, len(symbols))
+                      c.symname, len(globals.symbols))
   }
   fmt.Printf("'%s' is at 0x%012x\n", sym.Name(), sym.Address())
   return nil
@@ -235,13 +234,13 @@ func (s SymListA) Swap(i int, j int) { s[i], s[j] = s[j], s[i] }
 
 // find what function the given address is in.
 func find_function(address uintptr) (*bfd.Symbol, error) {
-  if len(symbols) == 0 {
+  if len(globals.symbols) == 0 {
     return nil, errors.New("symbol list is empty, forgot to load them?")
   }
   // copy our symlist to a new variable so that we can change the sort order to
   // be addresses instead of names without mucking up our normal table.
-  addr_syms := make([]bfd.Symbol, len(symbols))
-  copy(addr_syms, symbols)
+  addr_syms := make([]bfd.Symbol, len(globals.symbols))
+  copy(addr_syms, globals.symbols)
   sort.Sort(SymListA(addr_syms))
 
   // We can't use sort.Search here because 'address' can be in the middle of a
@@ -334,7 +333,7 @@ func (csymlist) Execute(inferior *ptrace.Tracee) (error) {
   if err := verify_symbols_loaded(inferior) ; err != nil { return err }
 
   n := 0
-  for _, s := range symbols {
+  for _, s := range globals.symbols {
     if n+1+len(s.Name()) > 80 {
       fmt.Printf("\n")
       n = 0
@@ -1156,10 +1155,10 @@ func (c cdebuginfo) Execute(inferior *ptrace.Tracee) error {
   if err := verify_symbols_loaded(inferior) ; err != nil {
     return err
   }
-  sym := symbol(c.fqn, symbols)
+  sym := symbol(c.fqn, globals.symbols)
   if sym == nil {
     return fmt.Errorf("could not find '%s' among the %d known symbols.",
-                      c.fqn, len(symbols))
+                      c.fqn, len(globals.symbols))
   }
 
   typ, err := debug.TypeLocal(globals.program, c.fqn, offset)
@@ -1301,8 +1300,7 @@ func parse_cmdline(line string) (Command) {
     default: return cgeneric{tokens}
   }
 }
-func Commands(gbl CmdGlobal) (chan Command) {
-  globals = gbl
+func Commands() (chan Command) {
   cmds := make(chan Command)
   go func() {
     defer close(cmds)

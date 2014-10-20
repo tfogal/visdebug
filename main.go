@@ -117,7 +117,9 @@ func main() {
     defer pprof.StopCPUProfile()
   }
 
-  globals = CmdGlobal{program: argv[0]}
+  // we're not running anything yet, and might not ever depending on the option
+  // given, so we need to leave symbols nil and fill it in later.
+  globals = CmdGlobal{program: argv[0], symbols: nil}
 
   if symlist {
     readsymbols(argv[0]);
@@ -217,8 +219,7 @@ func interactive(argv []string) {
     return
   }
 
-  cmds := Commands(CmdGlobal{argv[0]})
-
+  cmds := Commands()
   events := proc.Events()
   fmt.Println("Please state the nature of the debugging emergency.")
 
@@ -291,9 +292,17 @@ func MainSync(program string, inferior *ptrace.Tracee) error {
 
   iptr, err := inferior.GetIPtr()
   if err != nil { return err }
+  // now we're at main and the program is stopped.
   fmt.Printf("[go] process %d hit main at 0x%0x\n", inferior.PID(), iptr)
 
-  // now we're at main and the program is stopped.
+  // not sure this belongs here, but we need these and this is the first place
+  // we can actually read symbols from the process.
+  globals.symbols, err = bfd.SymbolsProcess(inferior)
+  if err != nil {
+    return err
+  }
+  globals.program = program
+
   return nil
 }
 
