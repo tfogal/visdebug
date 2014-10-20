@@ -1,5 +1,6 @@
 package bfd
 import "fmt"
+import "sort"
 import "syscall"
 import "testing"
 import "github.com/tfogal/ptrace"
@@ -181,5 +182,22 @@ func TestLmapOffsets(t *testing.T) {
   if lname_offset() >= lnext_offset() {
     t.Fatalf("lname offset (%d) should be l.t. lnext offset (%d)",
              lname_offset(), lnext_offset())
+  }
+}
+
+func TestFind(t *testing.T) {
+  slist := []Symbol{
+    {"__MAIN", 0x400120, 0},
+    {"zend", 0x23491, 0},
+    {"abc", 0x400220, 0},
+    {"nothing", 0x4008123, 0},
+    {"def", 0x400320, 0},
+    {"ghi", 0x400340, 0},
+    {"GHI", 0x400840, 0},
+  }
+  sort.Sort(SymList(slist))
+  garbage := find_symbol("garbage", slist)
+  if garbage != nil {
+    t.Fatalf("garbage (%s) found but it's not in the list\n", garbage.Name())
   }
 }

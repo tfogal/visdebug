@@ -240,7 +240,7 @@ func find_symbol(name string, slist []Symbol) *Symbol {
   idx := sort.Search(len(slist), func (i int) bool {
     return slist[i].name >= name
   })
-  if idx == len(slist) {
+  if idx >= len(slist) || slist[idx].name != name {
     return nil
   }
   return &slist[idx]
