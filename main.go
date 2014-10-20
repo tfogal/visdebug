@@ -687,6 +687,39 @@ func ihandle(inferior *ptrace.Tracee) (ievent, error) {
   return status, errors.New("unknown case!")
 }
 
+// jumps can have many argument types, handle them appropriately.
+func follow_jump(inferior *ptrace.Tracee, ixn x86asm.Inst,
+                 address uintptr) uintptr {
+  if ixn.Op != x86asm.JMP {
+    panic("bad input: you should only give this function a jump instruction")
+  }
+  reloffset, isrel := ixn.Args[0].(x86asm.Rel)
+  if isrel {
+    return address + uintptr(reloffset)
+  }
+
+  memref, ismref := ixn.Args[0].(x86asm.Mem)
+  if ismref {
+    var mr uintptr
+    switch memref.Base {
+    case x86asm.RIP:
+      // NOT regs.Rip: that'd be the current IPtr, not what the IPtr would be at
+      // the given instruction.
+      mr = address
+    case x86asm.RBP:
+      regs, err := inferior.GetRegs()
+      if err != nil {
+        protection.Error("could not get registers: %v\n", err)
+      }
+      mr = uintptr(regs.Rbp)
+    default: protection.Error("unhandled register base: %v\n", memref)
+    }
+    return uintptr(int64(mr) + int64(int32(memref.Disp)))
+  }
+  protection.Error("not reloffset, not memref, what is this: %v?", ixn.Args[0])
+  return 0x0 // i.e. an error
+}
+
 func find_opcode(opcode x86asm.Op, inferior *ptrace.Tracee,
                  startaddr uintptr) (uintptr, error) {
   insn := make([]byte, 16)
@@ -707,7 +740,7 @@ func find_opcode(opcode x86asm.Op, inferior *ptrace.Tracee,
     addr += uintptr(ixn.Len)
     // do we want to do this?
     if ixn.Op == x86asm.JMP { // follow unconditional jumps.
-      addr += uintptr(ixn.Args[0].(x86asm.Rel))
+      addr = follow_jump(inferior, ixn, addr)
     }
   }
   return 0x0, errors.New("instruction never found")
@@ -871,7 +904,7 @@ func mallocs(argv []string) {
           log.Fatalf("could not revoke perms for: %v\n", err)
         }
 
-        if vm.dims != nil && updates % 50 == 0 {
+        if vm.dims != nil && updates % 10 == 0 {
           updates = 0
           // todo/bad: don't use 'vm' here, that assumes the most recent memory
           // is the one of interest here, which might not be true.
@@ -940,6 +973,7 @@ func mallocs(argv []string) {
         // a loop, or e.g. as calloc does.
         continue
       }
+      protection.Trace("got bounds: %v\n", dims)
       vm.dims = dims
     default:
       log.Fatalf("unhandled event type: %v\n", iev)
@@ -969,7 +1003,8 @@ func break_ret(inferior *ptrace.Tracee) (debug.Breakpoint, error) {
   // Search for the 'RET' as a location to insert our BP.
   ret, err := find_opcode(x86asm.RET, inferior, symb.Address())
   if err != nil {
-    log.Fatalf("could not find RET starting from 0x%0x\n", symb.Address())
+    log.Fatalf("could not find RET starting from 0x%0x (%s)\n", symb.Address(),
+               symb.Name())
   }
   protection.Trace("inserting BP at 0x%0x so we can re-enable " +
                    "memory protection.\n", ret)
@@ -1004,7 +1039,7 @@ func bounds(program string, inferior *ptrace.Tracee) ([]uint, error) {
     // then it's a C library function, don't bother, it's probably
     // calloc or something that would access the memory but not do anything
     // that gives us extra information.
-    return nil, fmt.Errorf("%s is a library function", symbol.Name())
+    return nil, fmt.Errorf("%s is a library function, ignoring", symbol.Name())
   }
   protection.Trace("building CFG for %s@0x%0x", symbol.Name(), symbol.Address())
   graph := cfg.FromAddress(program, symbol.Address())
