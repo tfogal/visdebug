@@ -334,11 +334,11 @@ func (csymlist) Execute(inferior *ptrace.Tracee) (error) {
 
   n := 0
   for _, s := range globals.symbols {
+    if s.Name() == "" { continue } // stupid "blank" symbols, WTF are these??
     if n+1+len(s.Name()) > 80 {
       fmt.Printf("\n")
       n = 0
     }
-    if s.Name() == "" { continue } // stupid "blank" symbols, WTF are these??
     nbytes, err := fmt.Printf("%s ", s.Name())
     if err != nil { return err }
 
