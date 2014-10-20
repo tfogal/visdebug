@@ -897,7 +897,6 @@ func mallocs(argv []string) {
       if err := inferior.ClearSignal() ; err != nil {
         log.Fatalf("could not clear segv: %v\n", err)
       }
-      protection.Trace("signal cleared\n")
       if err := allow(inferior, alc.base, uint(alc.lpage), iptr) ; err != nil {
         log.Fatalf("could not allow 0x%0x: %v\n", alc.base, err)
       }
@@ -968,16 +967,36 @@ func break_ret(inferior *ptrace.Tracee) (debug.Breakpoint, error) {
   return debug.Break(inferior, ret)
 }
 
+// determines whether or not a symbol is a symbol that we might want to
+// trace/care about it accessing memory of interest.  One example of an
+// `uninteresting' function is calloc: it will write to the allocated
+// memory, but we don't care about any write it would ever do.
+func user_symbol(name string) bool {
+  if strings.Contains(name, "@@") {
+    return false
+  }
+  syms := []string{"calloc", "free", "getpagesize", "mmap", "mprotect",
+    "posix_memalign"}
+  for _, s := range syms {
+    if s == name {
+      return false
+    }
+  }
+  return true
+}
+
 func bounds(program string, inferior *ptrace.Tracee) ([]uint, error) {
   symbol, err := where(inferior)
   if err != nil {
     log.Fatalf("Cannot find where we are: %v", err)
   }
-  if strings.Contains(symbol.Name(), "@@") {
+  if !user_symbol(symbol.Name()) {
     // then it's a C library function, don't bother, it's probably
-    // calloc or something.
+    // calloc or something that would access the memory but not do anything
+    // that gives us extra information.
     return nil, fmt.Errorf("%s is a library function", symbol.Name())
   }
+  protection.Trace("building CFG for %s@0x%0x", symbol.Name(), symbol.Address())
   graph := cfg.FromAddress(program, symbol.Address())
   if rn := root_node(graph, symbol) ; rn != nil {
     cfg.Analyze(rn)
