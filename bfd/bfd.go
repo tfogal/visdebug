@@ -274,24 +274,6 @@ func filter_symbols(sy []Symbol, existing []Symbol) []Symbol {
   return rv
 }
 
-// there are some symbols, e.g. malloc, that we always need, even if the
-// application didn't call them directly.  you might think that every
-// application needs malloc, but a fortran application, for example, only calls
-// malloc through a shared library
-type needed_sym struct {
-  fromlibrary string
-  symname string
-}
-var needed = []needed_sym{
-  {"libc.so", "calloc"},
-  {"libc.so", "free"},
-  {"libc.so", "getpagesize"},
-  {"libc.so", "malloc"},
-  {"libc.so", "mmap"},
-  {"libc.so", "mprotect"},
-  {"libc.so", "posix_memalign"},
-}
-
 type linkmap struct {
   l_addr uintptr
   l_next uintptr
@@ -341,6 +323,13 @@ func lnext_offset() uintptr {
   return uintptr(offs)
 }
 
+// there are some libraries that contain important symbols, e.g. 'malloc' from
+// libc, that we always need.
+var needed_libraries = []string{
+  "libc.so",
+  "libgfortran.so",
+}
+
 /* reads symbols from the process, properly relocating them to get their actual
  * address. */
 func SymbolsProcess(inferior *ptrace.Tracee) ([]Symbol, error) {
@@ -366,7 +355,7 @@ func SymbolsProcess(inferior *ptrace.Tracee) ([]Symbol, error) {
     if err != nil {
       log.Fatalf("could not load link map 0x%x: %v\n", lmap_addr, err)
     }
-    fmt.Fprintf(strm, "Library loaded at 0x%012x, next at %p [%s]\n",
+    fmt.Fprintf(strm, "Library loaded at 0x%012x, next at 0x%x [%s]\n",
                 lmap.l_addr, lmap.l_next, lmap.libname)
     lmap_addr = uintptr(C.uintptr(unsafe.Pointer(lmap.l_next))) // next round.
     // skip empty libraries: no symbols we care about there
@@ -387,25 +376,25 @@ func SymbolsProcess(inferior *ptrace.Tracee) ([]Symbol, error) {
 
     relocate_symbols(libsym, uintptr(lmap.l_addr))
 
-    // most of the time, unless the symbols already exist in the main
-    // executable, we don't care about them.  however, there a few symbols in
-    // shared libraries that we really need, regardless of if they are directly
-    // used by the application.
-    for _, need := range needed {
-      if strings.Contains(lmap.libname, need.fromlibrary) {
-        symb := find_symbol(need.symname, libsym)
-        if symb != nil {
-          fmt.Fprintf(strm, "Adding %s from %s.\n", symb.Name(), lmap.libname)
-          symbols = append(symbols, *symb)
+    // Some libraries are important.  Make sure to copy them over.
+    for _, need := range needed_libraries {
+      if strings.Contains(lmap.libname, need) {
+        // Add every symbol, but only if it won't create duplicates.
+        for _, librarysym := range libsym {
+          ls := find_symbol(librarysym.Name(), symbols)
+          if ls == nil {
+            symbols = append(symbols, librarysym)
+          }
         }
       }
     }
-    sort.Sort(SymList(libsym))
 
+    sort.Sort(SymList(libsym))
     fix_symbols(symbols, libsym)
 
     if lmap_addr == 0x0 { break }
   }
   sort.Sort(SymList(symbols))
+  fmt.Fprintf(strm, "%d total symbols.\n", len(symbols))
   return symbols, nil
 }

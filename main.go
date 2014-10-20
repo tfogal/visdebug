@@ -985,7 +985,7 @@ func user_symbol(name string) bool {
     return false
   }
   syms := []string{"calloc", "free", "getpagesize", "mmap", "mprotect",
-    "posix_memalign"}
+    "posix_memalign", "memset"}
   for _, s := range syms {
     if s == name {
       return false
