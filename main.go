@@ -658,15 +658,16 @@ func ihandle(inferior *ptrace.Tracee) (ievent, error) {
     if err != nil {
       return nil, err
     }
-    symb, err := where(inferior)
-    if err != nil {
-      return nil, err
-    }
     iptr, err := inferior.GetIPtr()
     if err != nil {
       return nil, err
     }
-    protection.Trace("segfault at %s+%d\n", symb.Name(), iptr-symb.Address())
+    symb, err := find_function(iptr)
+    if err != nil {
+      return nil, err
+    }
+    protection.Trace("segfault at %s+%d: 0x%0x\n", symb.Name(),
+                     iptr-symb.Address(), iptr)
 
     return segfault{addr: sig.Addr}, nil
   case status.StopSignal() == syscall.SIGTRAP:
