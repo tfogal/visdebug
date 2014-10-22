@@ -754,21 +754,35 @@ func (v visualmem) String() string {
   return fmt.Sprintf("visual mem: %v %v", v.alloc, v.dims)
 }
 
+func castf(data []byte) []float32 {
+  const SIZEOF_F32 = 4
+  if len(data) % SIZEOF_F32 != 0 {
+    log.Fatalf("byte array is not a multiple of float size!\n")
+  }
+  hdr := *(*reflect.SliceHeader)(unsafe.Pointer(&data))
+  hdr.Len /= SIZEOF_F32
+  hdr.Cap /= SIZEOF_F32
+  dataf32 := *(*[]float32)(unsafe.Pointer(&hdr))
+  return dataf32
+}
+
 // disgusting function to copy from a byte-slice-of-floats to an
 // actual-slice-of-floats.  We need this because syscall.Ptrace*'s reads are
 // broken, they should give an interface but give the byte array nonsense
 // instead.
-func copyf(to []float32, from []byte) {
-  //cfloat := C.castf((unsafe.Pointer)(from))
+// syscall.PtracePeekData as well as our tfogal/ptrace 'Read' wrapper both take
+// a []byte as the thing to read into.  This is arguably broken.
+// We are working with floating point data, and thus have floating point arrays
+// that we would like the data to be read into.  This hack is basically a cast
+// that says 'give me a pointer to the same array, but make its type be
+// compatible with the broken interface of 'Read' and syscall.PtracePeekData'.
+func castf32b(data []float32) []byte {
   const SIZEOF_F32 = 4
-  hdr := *(*reflect.SliceHeader)(unsafe.Pointer(&from))
-  hdr.Len /= SIZEOF_F32
-  hdr.Cap /= SIZEOF_F32
-  data := *(*[]float32)(unsafe.Pointer(&hdr))
-  if hdr.Len != len(to) {
-    log.Fatalf("data is %d elems, target is %d elems", hdr.Len, len(to))
-  }
-  copy(to, data)
+  hdr := *(*reflect.SliceHeader)(unsafe.Pointer(&data))
+  hdr.Len *= SIZEOF_F32
+  hdr.Cap *= SIZEOF_F32
+  dbyte := *(*[]byte)(unsafe.Pointer(&hdr))
+  return dbyte
 }
 
 // runs a program, replacing every 'malloc' in a program with
@@ -897,17 +911,14 @@ func mallocs(argv []string) {
           log.Fatalf("could not revoke perms for: %v\n", err)
         }
 
-        if vm.dims != nil && updates % 10 == 0 {
+        if vm.dims != nil && len(vm.dims) == 2 && updates % 10 == 0 {
           updates = 0
           // todo/bad: don't use 'vm' here, that assumes the most recent memory
           // is the one of interest here, which might not be true.
-          tmp := make([]byte, vm.dims[0]*vm.dims[1]*4)
-          if err := inferior.Read(vm.alloc.base, tmp) ; err != nil {
+          bslice := castf32b(vm.data)  // for Read; see castf32b comment.
+          if err := inferior.Read(vm.alloc.base, bslice) ; err != nil {
             log.Fatalf("could not read inferior's data: %v\n", err)
           }
-          // we need this gross 'copyf' because our inferior.Read
-          // takes a []byte instead of an interface{}, so we can't cast :-(
-          copyf(vm.data, tmp)
           mx := maxf(vm.data)
           vm.gsfield.Render(vm.data, vm.dims, mx)
         }
