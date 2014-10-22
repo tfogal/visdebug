@@ -327,7 +327,16 @@ func lnext_offset() uintptr {
 // libc, that we always need.
 var needed_libraries = []string{
   "libc.so",
+  "libdl.so",
   "libgfortran.so",
+  "libgcc_s.so",
+  "libhdf5.so",
+  "libm.so",
+  "libpthread.so",
+  "libquadmath.so",
+  "libstdc++.so",
+  "libutil.so",
+  "libz.so",
 }
 
 /* reads symbols from the process, properly relocating them to get their actual
