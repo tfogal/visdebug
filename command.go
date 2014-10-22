@@ -25,6 +25,7 @@ import "./msg"
 type CmdGlobal struct {
   program string // the filename for the program we are running
   symbols []bfd.Symbol // the list of symbols from the process
+  symbolsAddr []bfd.Symbol // list of symbols, sorted by address.
 }
 
 // initialization info that commands might want to use.
@@ -237,32 +238,35 @@ func find_function(address uintptr) (*bfd.Symbol, error) {
   if len(globals.symbols) == 0 {
     return nil, errors.New("symbol list is empty, forgot to load them?")
   }
-  // copy our symlist to a new variable so that we can change the sort order to
-  // be addresses instead of names without mucking up our normal table.
-  addr_syms := make([]bfd.Symbol, len(globals.symbols))
-  copy(addr_syms, globals.symbols)
-  sort.Sort(SymListA(addr_syms))
+  if globals.symbolsAddr == nil {
+    // copy our symlist to a new variable so that we can change the sort order
+    // to be addresses instead of names without mucking up our normal table.
+    globals.symbolsAddr = make([]bfd.Symbol, len(globals.symbols))
+    copy(globals.symbolsAddr, globals.symbols)
+    sort.Sort(SymListA(globals.symbolsAddr))
+  }
 
   // We can't use sort.Search here because 'address' can be in the middle of a
   // function, and we don't have an entry for every possible address.  We just
   // want to find the "minimum" address we are in.
   fidx := 0
-  for i, sy := range addr_syms { // todo we should really do a binary search
+  for i, sy := range globals.symbolsAddr { // todo binary search
     if sy.Address() <= address { fidx = i }
     if sy.Address() > address { break } // will never find anything
   }
-  if fidx == len(addr_syms) {
+  if fidx >= len(globals.symbolsAddr) ||
+     globals.symbolsAddr[fidx].Address() > address {
     return nil, fmt.Errorf("addr 0x%0x not found in %d-symbol list", address,
-                           len(addr_syms))
+                           len(globals.symbolsAddr))
   }
-  if addr_syms[fidx].Address() == 0x0 {
+  if globals.symbolsAddr[fidx].Address() == 0x0 {
     return nil,
            errors.New("we are near NULL?  I don't believe it, probably a bug.")
   }
-  if addr_syms[fidx].Name() == "" {
+  if globals.symbolsAddr[fidx].Name() == "" {
     return nil, errors.New("insn ptr is in no man's land.")
   }
-  return &addr_syms[fidx], nil
+  return &globals.symbolsAddr[fidx], nil
 }
 
 // identifies the root node (function entry point) of the graph
