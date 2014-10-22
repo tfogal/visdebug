@@ -1,0 +1,6 @@
+A series of test programs for our code.
+
+A lot of these take/read ridiculous arguments to prevent the optimizer
+playing tricks on us. "malloc(42)" usually gets optimized out, for
+example, but if the argument is dependent on a command line option then
+the optimizer cannot rearrange the code to avoid dynamic allocation.
