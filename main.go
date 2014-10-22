@@ -405,16 +405,15 @@ func (x86_64) RetVal(inferior *ptrace.Tracee) uint64 {
 
 // forces the inferior to alloc a page && tells us that page's base address.
 func getpage(inferior *ptrace.Tracee) (uintptr, error) {
-  symbols, err := bfd.SymbolsProcess(inferior)
-  if err != nil {
+  if err := verify_symbols_loaded(inferior) ; err != nil {
     return 0x0, err
   }
 
-  mmap := symbol("mmap", symbols)
+  mmap := symbol("mmap", globals.symbols)
   if mmap == nil {
     return 0x0, errors.New("'mmap' not in symbol list!")
   }
-  main := symbol("main", symbols)
+  main := symbol("main", globals.symbols)
   if main == nil {
     return 0x0, errors.New("'main' not in symbol list!")
   }
@@ -433,8 +432,7 @@ func getpage(inferior *ptrace.Tracee) (uintptr, error) {
 // Returns the address of the inserted function in the inferior's address
 // space.
 func setup_tjfmalloc(inferior *ptrace.Tracee) (uintptr, error) {
-  symbols, err := bfd.SymbolsProcess(inferior)
-  if err != nil {
+  if err := verify_symbols_loaded(inferior) ; err != nil {
     return 0x0, err
   }
 
@@ -443,11 +441,11 @@ func setup_tjfmalloc(inferior *ptrace.Tracee) (uintptr, error) {
     return 0x0, err
   }
 
-  malign := symbol("posix_memalign", symbols)
+  malign := symbol("posix_memalign", globals.symbols)
   if malign == nil {
     return 0x0, errors.New("'posix_memalign' not in symbol list!")
   }
-  mprot := symbol("mprotect", symbols)
+  mprot := symbol("mprotect", globals.symbols)
   if mprot == nil {
     return 0x0, errors.New("'mprotect' not in symbol list!")
   }
@@ -468,11 +466,10 @@ func setup_unprotect(inferior *ptrace.Tracee) (uintptr, error) {
     return 0x0, err
   }
 
-  symbols, err := bfd.SymbolsProcess(inferior)
-  if err != nil {
+  if err := verify_symbols_loaded(inferior) ; err != nil {
     return 0x0, err
   }
-  mprot := symbol("mprotect", symbols)
+  mprot := symbol("mprotect", globals.symbols)
   if mprot == nil {
     return 0x0, errors.New("'mprotect' not in symbol list!")
   }
@@ -503,11 +500,11 @@ func iprotect(inferior *ptrace.Tracee, addr uintptr, len uint,
   if uint64(addr) % 4096 != 0 || len % 4096 != 0 {
     return errors.New("memory is not page-aligned.")
   }
-  symbols, err := bfd.SymbolsProcess(inferior)
-  if err != nil {
+  if err := verify_symbols_loaded(inferior) ; err != nil {
     return err
   }
-  mprotect := symbol("mprotect", symbols)
+
+  mprotect := symbol("mprotect", globals.symbols)
   if mprotect == nil {
     return errors.New("'mprotect' not in symbol list!")
   }
@@ -790,11 +787,7 @@ func mallocs(argv []string) {
     return
   }
 
-  symbols, err := bfd.SymbolsProcess(inferior)
-  if err != nil {
-    log.Fatalf("could not read inferior's symbols: %v\n", err)
-  }
-  symmalloc := symbol("malloc", symbols)
+  symmalloc := symbol("malloc", globals.symbols)
   if symmalloc == nil {
     log.Fatalf("Binary does not have 'malloc'.  Giving up.\n")
     return
@@ -1104,17 +1097,18 @@ func show_free_space(argv []string) {
     return
   }
 
-  symbols, err := bfd.SymbolsProcess(inferior)
-  if err != nil { log.Fatalf("could not read smbols: %v\n", err) }
+  if err := verify_symbols_loaded(inferior) ; err != nil {
+    log.Fatalf("error reading symbols: %v\n", err)
+  }
 
   // these symbols are part of libc; if they're not there, i can't imagine we'd
   // have made it here.
-  assert(symbol("getpagesize", symbols) != nil)
-  assert(symbol("posix_memalign", symbols) != nil)
+  assert(symbol("getpagesize", globals.symbols) != nil)
+  assert(symbol("posix_memalign", globals.symbols) != nil)
 
-  fspace_fill(inferior, symbol("getpagesize", symbols).Address(),
-              symbol("posix_memalign", symbols).Address(),
-              symbol("mprotect", symbols).Address())
+  fspace_fill(inferior, symbol("getpagesize", globals.symbols).Address(),
+              symbol("posix_memalign", globals.symbols).Address(),
+              symbol("mprotect", globals.symbols).Address())
 }
 
 // slice[i] = word[i] forall i in word
