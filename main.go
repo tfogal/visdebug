@@ -950,12 +950,16 @@ func mallocs(argv []string) {
       access.bp, err = debug.Break(inferior, raddr)
       if err != nil {
         protection.Trace("can't find retaddr from insn 0x%0x: %v\n", raddr, err)
-        protection.Trace("Will attempt to find a RET insn, instead.\n")
-
-        access.bp, err = break_ret(inferior)
+        raddr = stk.RetAddrMid(inferior)
+        access.bp, err = debug.Break(inferior, raddr)
         if err != nil {
-          log.Fatalf("could not find a place to re-enable memory protection!" +
-                     "%v\n", err)
+          protection.Warning("both stack lookups failed us.  2nd: %v\n", err)
+          protection.Trace("Will attempt to find a RET insn, instead.\n")
+          access.bp, err = break_ret(inferior)
+          if err != nil {
+            log.Fatalf("could not find a place to re-enable memory " +
+                       "protection! %v\n", err)
+          }
         }
       }
 
