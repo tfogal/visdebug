@@ -1028,8 +1028,14 @@ func user_symbol(name string) bool {
   if strings.Contains(name, "@@") {
     return false
   }
-  syms := []string{"calloc", "free", "getpagesize", "mmap", "mprotect",
-    "posix_memalign", "memset"}
+  if strings.HasPrefix(name, "H5") { // i.e. HDF5 symbols.
+    return false
+  }
+  syms := []string{
+    "calloc", "envz_strip", "fgets", "free", "getpagesize", "mmap", "memset",
+    "mprotect", "posix_memalign", "_IO_fgets",
+  }
+
   for _, s := range syms {
     if s == name {
       return false
