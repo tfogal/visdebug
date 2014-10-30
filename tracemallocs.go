@@ -6,15 +6,14 @@ import(
   "log"
 )
 
-func newmallocs(argv []string) {
+func newmallocs(argv []string, ie InferiorEvent) {
   inferior, err := instrument(argv)
   if err != nil {
     log.Fatalf("error: %v\n", err)
   }
   defer inferior.Close()
 
-  var mt MallocTrace
-  mt.Setup(inferior)
+  ie.Setup(inferior)
   for {
     ievent, err := ihandle(inferior)
     if err == io.EOF {

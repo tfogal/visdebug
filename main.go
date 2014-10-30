@@ -142,7 +142,9 @@ func main() {
     interactive(argv)
   }
   if malloctrace {
-    newmallocs(argv)
+    //var mt MallocTrace
+    var mt AlignAlloc
+    newmallocs(argv, &mt)
   }
   if showmallocs {
     go mallocs(argv)

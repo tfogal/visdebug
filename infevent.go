@@ -1,6 +1,7 @@
 package main
 
 import(
+  "fmt"
   "log"
   "./debug"
   "github.com/tfogal/ptrace"
@@ -19,7 +20,9 @@ type InferiorEvent interface {
   AddBP(inf *ptrace.Tracee, addr uintptr, cb BPcb) error
   // remove a breakpoint
   DropBP(inf *ptrace.Tracee, addr uintptr) error
-  // identify the breakpoint for the given address and call its callback.
+  // identify the breakpoint for the given address and call its callback.  Note
+  // that this also drops the BP!  make arrangements for it to be reinserted
+  // somewhere else if you still need/want it.
   Trap(inf *ptrace.Tracee, address uintptr) error
 
   // handle a segfault.
@@ -47,6 +50,22 @@ func (be *BaseEvent) Setup(*ptrace.Tracee) error {
   return nil
 }
 
+/* for debugging */
+func (be *BaseEvent) printBPs() {
+  fmt.Println("bps are now:")
+  sm := symbol("malloc", globals.symbols).Address()
+  sf := symbol("free", globals.symbols).Address()
+  for k, v := range be.bp {
+    if k == sm {
+      fmt.Printf("bp: malloc: %v\n", v.bp)
+    } else if k == sf {
+      fmt.Printf("bp: free: %v\n", v.bp)
+    } else {
+      fmt.Printf("bp: 0x%x: %v\n", k, v.bp)
+    }
+  }
+}
+
 func (be *BaseEvent) AddBP(inferior *ptrace.Tracee, addr uintptr,
                            cb BPcb) error {
   bp, err := debug.Break(inferior, addr)
@@ -67,7 +86,14 @@ func (be *BaseEvent) DropBP(inferior *ptrace.Tracee, addr uintptr) error {
 }
 
 func (be *BaseEvent) Trap(inferior *ptrace.Tracee, addr uintptr) error {
-  if err := be.bp[addr].cb(inferior, be.bp[addr].bp) ; err != nil {
+  bpinfo := be.bp[addr]
+  // drop the BP.  Execution can't continue otherwise.  If the user wants the
+  // breakpoint to be persistent, they need to setup a mechanism by which it
+  // will get re-inserted.
+  if err := be.DropBP(inferior, addr) ; err != nil {
+    return err
+  }
+  if err := bpinfo.cb(inferior, be.bp[addr].bp) ; err != nil {
     return err
   }
   return nil

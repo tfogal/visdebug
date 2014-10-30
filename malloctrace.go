@@ -21,10 +21,6 @@ func (mt *MallocTrace) malloc(inferior *ptrace.Tracee,
   var stk x86_64
   mt.alloc.length = uint(stk.Arg1(inferior))
 
-  // remove the BP so we can get run enough to return back to the caller
-  if err := mt.DropBP(inferior, bp.Address) ; err != nil {
-    return err
-  }
   // figure out where the caller is and set a BP there.
   retaddr := stk.RetAddr(inferior)
 
@@ -42,17 +38,40 @@ func (mt *MallocTrace) mallocret(inferior *ptrace.Tracee,
   // do our actual work: printing out what happens.
   fmt.Printf("malloc(%d) -> 0x%0x\n", mt.alloc.length, mt.alloc.base)
 
-  // get rid of this BP ...
-  if err := mt.DropBP(inferior, bp.Address) ; err != nil {
-    return err
-  }
   mloc := symbol("malloc", globals.symbols)
   assert(mloc != nil)
 
-  // and re-insert our BP for malloc.
+  // re-insert our BP for malloc.
   if err := mt.AddBP(inferior, mloc.Address(), mt.malloc) ; err != nil {
     return err
   }
+  return nil
+}
+
+func (mt *MallocTrace) free(inferior *ptrace.Tracee,
+                            bp debug.Breakpoint) error {
+  var stk x86_64
+  // make sure this BP gets re-added when we come back.
+  // I do not understand why this needs the 'Top' variant, but it does...
+  raddr := uintptr(stk.RetAddrTop(inferior))
+  if err := mt.AddBP(inferior, raddr, mt.freeret) ; err != nil {
+    return err
+  }
+
+  // get the thing that is being freed.
+  ptr := uintptr(stk.Arg1(inferior))
+  fmt.Printf("free(0x%x)\n", ptr)
+
+  return nil
+}
+
+func (mt *MallocTrace) freeret(inferior *ptrace.Tracee,
+                               bp debug.Breakpoint) error {
+  free := symbol("free", globals.symbols)
+  if err := mt.AddBP(inferior, free.Address(), mt.free) ; err != nil {
+    return err
+  }
+
   return nil
 }
 
@@ -65,8 +84,12 @@ func (mt *MallocTrace) Setup(inferior *ptrace.Tracee) error {
   if symmalloc == nil {
     return errors.New("'malloc' not available; error reading symtab?")
   }
+  symfree := symbol("free", globals.symbols)
 
   if err := mt.AddBP(inferior, symmalloc.Address(), mt.malloc) ; err != nil {
+    return err
+  }
+  if err := mt.AddBP(inferior, symfree.Address(), mt.free) ; err != nil {
     return err
   }
   return nil
