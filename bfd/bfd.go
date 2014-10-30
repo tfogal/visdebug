@@ -75,6 +75,9 @@ type Symbol struct {
   addr uintptr
   flags uint
 }
+func MakeSymbol(name string, addr uintptr, flags uint) Symbol {
+  return Symbol{name: name, addr: addr, flags: flags}
+}
 func (s *Symbol) Name() (string) { return s.name }
 func (s *Symbol) Address() (uintptr) { return s.addr }
 func (s *Symbol) Local() (bool) { return (s.flags & bfd_BSF_LOCAL) > 0; }
