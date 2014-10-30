@@ -28,10 +28,8 @@ type InferiorEvent interface {
   // handle a segfault.
   Segfault(inf *ptrace.Tracee, address uintptr) error
 
-/*
-  AddWatch(inf *ptrace.Tracee, addr_range allocation,
-           cb func(*ptrace.Tracee, allocation) error) error
-*/
+  AddWatch(inf *ptrace.Tracee, addr_range allocation, cb SFcb) error
+  DropWatch(*ptrace.Tracee, allocation) error
 }
 
 type breakelem struct {
@@ -120,13 +118,34 @@ func (be *BaseEvent) Segfault(inferior *ptrace.Tracee, access uintptr) error {
   if err != nil {
     return fmt.Errorf("segfault at 0x%x (%v)", access, err)
   }
-/* DropWatch doesn't exist, yet...
-  if err := be.DropWatch(inferior, sfinfo.alloc.base) ; err != nil {
+
+  if err := be.DropWatch(inferior, sfinfo.alloc) ; err != nil {
     return err
   }
-*/
+
   if err := sfinfo.cb(inferior, sfinfo.alloc) ; err != nil {
     return err
   }
+  return nil
+}
+
+func (be *BaseEvent) AddWatch(inferior *ptrace.Tracee, pages allocation,
+                              cb SFcb) error {
+  err := deny(inferior, pages.base, pages.length, whereis(inferior))
+  if err != nil {
+    return err
+  }
+
+  be.sf[pages.base] = sfelem{alloc: pages, cb: cb}
+  return nil
+}
+
+func (be *BaseEvent) DropWatch(inferior *ptrace.Tracee,
+                               pages allocation) error {
+  err := allow(inferior, pages.base, pages.length, whereis(inferior))
+  if err != nil {
+    return err
+  }
+  delete(be.sf, pages.base)
   return nil
 }
