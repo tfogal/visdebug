@@ -150,6 +150,18 @@ func main() {
     var mt MallocTrace
     newmallocs(argv, &mt)
   }
+//  if my new stuff ... {
+//    var vmem visualmem2D
+//    go func() {
+//      if err := gfx.Context() ; err != nil { // establish OGL stuff.
+//        evc.Trace("Could not establish context: %v, skipping..\n", err)
+//      }
+//      defer gfx.Close()
+//      go newmallocs(argv, &vmem)
+//    }
+//    gfx.Main()
+//  }
+
   if memhandle {
     var aa AlignAlloc
     newmallocs(argv, &aa)

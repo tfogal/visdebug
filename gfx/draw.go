@@ -113,10 +113,10 @@ func s2dprogram() gl.Program {
 // 'Render'.
 func (s s2d) Pre() {
   Exec(func() error {
+    flush_errors("pre: start")
     s.vao = gl.GenVertexArray()
     s.vao.Bind()
 
-    flush_errors("pre: start")
     s.vertvbo = gl.GenBuffer()
     s.vertvbo.Bind(gl.ARRAY_BUFFER)
     s.quad = []float32{
@@ -168,6 +168,10 @@ func (s s2d) Render(data []float32, dims []uint, maximum float32) {
   if len(dims) != 2 {
     gfx.Error("%d dimensional data cannot be handled by this 2d code",
               len(dims))
+    return
+  }
+  if dims[0]*dims[1] == 0 {
+    gfx.Error("empty %dx%d field.", dims[0], dims[1])
     return
   }
   Exec(func() error {

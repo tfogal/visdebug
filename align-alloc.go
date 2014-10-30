@@ -135,3 +135,8 @@ func (aa *AlignAlloc) Setup(inferior *ptrace.Tracee) error {
 
   return nil
 }
+
+func (aa *AlignAlloc) Close(*ptrace.Tracee) error {
+  aa.alloc = nil
+  return nil
+}

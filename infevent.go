@@ -14,7 +14,9 @@ type SFcb func(*ptrace.Tracee, allocation) error
 // keep track of the breakpoints and 'watchpoints' for the user.
 type InferiorEvent interface {
   // Add initial breakpoints/watchpoints.
-  Setup(inf *ptrace.Tracee) error
+  Setup(*ptrace.Tracee) error
+  // clean up all our internal resources
+  Close(*ptrace.Tracee) error
 
   // add a breakpoint at the specified address.
   AddBP(inf *ptrace.Tracee, addr uintptr, cb BPcb) error

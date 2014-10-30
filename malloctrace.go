@@ -94,3 +94,7 @@ func (mt *MallocTrace) Setup(inferior *ptrace.Tracee) error {
   }
   return nil
 }
+
+func (mt *MallocTrace) Close(*ptrace.Tracee) error {
+  return nil
+}
