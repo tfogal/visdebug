@@ -300,7 +300,7 @@ func MainSync(program string, inferior *ptrace.Tracee) error {
   iptr, err := inferior.GetIPtr()
   if err != nil { return err }
   // now we're at main and the program is stopped.
-  fmt.Printf("[go] process %d hit main at 0x%0x\n", inferior.PID(), iptr)
+  fmt.Printf("[sup] process %d hit main at 0x%0x\n", inferior.PID(), iptr)
 
   // not sure this belongs here, but we need these and this is the first place
   // we can actually read symbols from the process.
@@ -918,7 +918,7 @@ func mallocs(argv []string) {
         }
 
         vm.alloc.base = uintptr(stk.RetVal(inferior))
-        fmt.Printf("[go] %v @ 0x%x\n", vm.alloc, iev.iptr)
+        fmt.Printf("[sup] %v @ 0x%x\n", vm.alloc, iev.iptr)
         vm.gsfield = gfx.ScalarField2D()
         vm.gsfield.Pre()
         var f32 float32
@@ -1016,7 +1016,7 @@ func mallocs(argv []string) {
   for _, v := range vmem {
     v.gsfield.Post()
   }
-  fmt.Printf("[go] inferior (%d) terminated.\n", inferior.PID())
+  fmt.Printf("[sup] inferior (%d) terminated.\n", inferior.PID())
 }
 
 // Find the function's 'ret' instruction and insert a breakpoint there.
@@ -1405,7 +1405,7 @@ func alloc_inferior(inferior *ptrace.Tracee, mmap uintptr,
   }
 
   // I'm so hilarious:
-  fmt.Println("[go] Now back to your regularly scheduled programming.")
+  fmt.Println("[sup] Now back to your regularly scheduled programming.")
   if err := inferior.SetRegs(orig_regs) ; err != nil {
     return 0x0, err
   }
