@@ -2,8 +2,8 @@
 package cfg
 // #include <stdlib.h>
 // #include "gocfg.h"
-// #cgo CXXFLAGS: -std=c++11
-// #cgo CXXFLAGS: -Wall -Wextra -I/home/tfogal/sw/include
+// #cgo CXXFLAGS: -std=c++11 -O3
+// #cgo CXXFLAGS: -Wall -Wextra -I/home/tfogal/sw/include -O3
 // #cgo LDFLAGS: -L/home/tfogal/sw/lib -lparseAPI -lsymLite -lz
 import "C"
 import "bytes"
