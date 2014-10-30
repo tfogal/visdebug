@@ -84,6 +84,7 @@ var freespace bool
 var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
 var wintest bool
 var malloctrace bool
+var memhandle bool
 func init() {
   runtime.LockOSThread()
   flag.BoolVar(&symlist, "symbols", false, "print out the symbol table")
@@ -95,6 +96,8 @@ func init() {
   flag.BoolVar(&freespace, "free", false, "show maps and find first free space")
   flag.BoolVar(&wintest, "window", false, "run graphics / windowing test")
   flag.BoolVar(&malloctrace, "mt", false, "trace 'malloc' calls")
+  flag.BoolVar(&memhandle, "dbg", false, "instrument, adding checks for " +
+                                         "invalid memory handling")
 }
 
 func basename(s string) (string) {
@@ -142,9 +145,12 @@ func main() {
     interactive(argv)
   }
   if malloctrace {
-    //var mt MallocTrace
-    var mt AlignAlloc
+    var mt MallocTrace
     newmallocs(argv, &mt)
+  }
+  if memhandle {
+    var aa AlignAlloc
+    newmallocs(argv, &aa)
   }
   if showmallocs {
     go mallocs(argv)
