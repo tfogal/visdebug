@@ -131,9 +131,9 @@ func (be *BaseEvent) Segfault(inferior *ptrace.Tracee, access uintptr) error {
 
 func (be *BaseEvent) AddWatch(inferior *ptrace.Tracee, pages allocation,
                               cb SFcb) error {
-  err := deny(inferior, pages.base, pages.length, whereis(inferior))
+  err := deny(inferior, pages.base, uint(pages.lpage), whereis(inferior))
   if err != nil {
-    return err
+    return fmt.Errorf("can't deny 0x%x+%d: %v", pages.base, pages.lpage, err)
   }
 
   be.sf[pages.base] = sfelem{alloc: pages, cb: cb}
@@ -142,9 +142,9 @@ func (be *BaseEvent) AddWatch(inferior *ptrace.Tracee, pages allocation,
 
 func (be *BaseEvent) DropWatch(inferior *ptrace.Tracee,
                                pages allocation) error {
-  err := allow(inferior, pages.base, pages.length, whereis(inferior))
+  err := allow(inferior, pages.base, uint(pages.lpage), whereis(inferior))
   if err != nil {
-    return err
+    return fmt.Errorf("can't allow 0x%x+%d: %v", pages.base, pages.lpage, err)
   }
   delete(be.sf, pages.base)
   return nil
