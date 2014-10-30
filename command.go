@@ -968,7 +968,12 @@ func readvalue(arg x86asm.Arg, ixnlen int, rf register_file, fqn string,
       return value{v: memarg, typ: typ}, nil
     }
   }
-  panic("argument is not register *or* memory?!")
+  imm, isconst := arg.(x86asm.Imm)
+  if isconst {
+    // how can we construct a proper type here?  there is none, really.
+    return value{v: uint64(imm), typ: debug.Type{}}, nil
+  }
+  return value{}, fmt.Errorf("insn '%v' is not reg, mem, or imm", arg)
 }
 
 // finds the register file associated with the given instruction.
