@@ -28,7 +28,7 @@ func newmallocs(argv []string, ie InferiorEvent) {
       }
     case segfault:
       if err := ie.Segfault(inferior, iev.addr) ; err != nil {
-        log.Fatalf("error in segfault@0x%x handling: %v\n", iev.addr, err)
+        log.Fatalf("%v\n", err)
       }
     default:
       log.Fatalf("unexpected event: %v\n", iev)

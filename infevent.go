@@ -2,12 +2,12 @@ package main
 
 import(
   "fmt"
-  "log"
   "./debug"
   "github.com/tfogal/ptrace"
 )
 
 type BPcb func(*ptrace.Tracee, debug.Breakpoint) error
+type SFcb func(*ptrace.Tracee, allocation) error
 
 // Registers and handles events for an inferior.  The client will register a
 // set of breakpoints and regions to watch (i.e. memory protect), and this will
@@ -38,15 +38,21 @@ type breakelem struct {
   bp debug.Breakpoint
   cb BPcb
 }
+type sfelem struct {
+  alloc allocation
+  cb SFcb
+}
 type BaseEvent struct {
   // It is silly to create a map of these based on the address, since the
   // address is in the Breakpoint itself.  But we need to be able to remove
   // breakpoints from our list, and you can't shrink a slice.
   bp map[uintptr]breakelem
+  sf map[uintptr]sfelem
 }
 
 func (be *BaseEvent) Setup(*ptrace.Tracee) error {
   be.bp = make(map[uintptr]breakelem)
+  be.sf = make(map[uintptr]sfelem)
   return nil
 }
 
@@ -99,7 +105,28 @@ func (be *BaseEvent) Trap(inferior *ptrace.Tracee, addr uintptr) error {
   return nil
 }
 
+func find_sf(addrs map[uintptr]sfelem, access uintptr) (sfelem, error) {
+  for _, fault := range addrs {
+    alc := fault.alloc
+    if alc.begin() <= access && access <= alc.end() {
+      return fault, nil
+    }
+  }
+  return sfelem{}, fmt.Errorf("allocation 0x%0x not found", access)
+}
+
 func (be *BaseEvent) Segfault(inferior *ptrace.Tracee, access uintptr) error {
-  log.Fatalf("segfault handler not yet implemented.\n")
+  sfinfo, err := find_sf(be.sf, access)
+  if err != nil {
+    return fmt.Errorf("segfault at 0x%x (%v)", access, err)
+  }
+/* DropWatch doesn't exist, yet...
+  if err := be.DropWatch(inferior, sfinfo.alloc.base) ; err != nil {
+    return err
+  }
+*/
+  if err := sfinfo.cb(inferior, sfinfo.alloc) ; err != nil {
+    return err
+  }
   return nil
 }
