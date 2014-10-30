@@ -11,6 +11,10 @@ type Breakpoint struct {
   insn uint64 // the instruction before we clobbered it with a BP
 }
 
+func (b Breakpoint) String() string {
+  return fmt.Sprintf("0x%x 0x%x", b.Address, b.insn)
+}
+
 // mask to apply to instructions when replacing their lead byte with 0xCC.
 const imask = 0xffffffffffffff00
 
