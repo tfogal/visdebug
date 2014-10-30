@@ -115,6 +115,8 @@ func main() {
   }
   argv := flag.Args()
 
+  log.SetFlags(log.Lshortfile)
+
   if *cpuprofile != "" {
     f, err := os.Create(*cpuprofile)
     if err != nil { panic(err) }
@@ -858,7 +860,9 @@ func mallocs(argv []string) {
   var access maccess
 
   // establish our OGL stuff.
-  gfx.Context()
+  if err := gfx.Context() ; err != nil {
+    log.Fatalf("GL init error: %v\n", err)
+  }
   defer gfx.Close()
 
   updates := uint(0)

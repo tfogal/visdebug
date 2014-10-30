@@ -112,7 +112,7 @@ func s2dprogram() gl.Program {
 // creates the static data / OGL objects we need.  Must be called before
 // 'Render'.
 func (s s2d) Pre() {
-  Exec(func() {
+  Exec(func() error {
     s.vao = gl.GenVertexArray()
     s.vao.Bind()
 
@@ -150,15 +150,17 @@ func (s s2d) Pre() {
     flush_errors("setting '" + tex2dname + "' uniform.")
 
     s.fldmaxloc = s.program.GetUniformLocation("fieldmax")
+    return nil
   })
 }
 
 // Cleans up our GL objects.  Resource leak if you forget to call.
 func (s s2d) Post() {
-  Exec(func() {
+  Exec(func() error {
     s.program.Delete()
     s.vertvbo.Delete()
     s.vao.Delete()
+    return nil
   })
 }
 
@@ -168,7 +170,7 @@ func (s s2d) Render(data []float32, dims []uint, maximum float32) {
               len(dims))
     return
   }
-  Exec(func() {
+  Exec(func() error {
     const format = gl.LUMINANCE
     const typ = gl.FLOAT
     const intformat = gl.R32F
@@ -187,5 +189,6 @@ func (s s2d) Render(data []float32, dims []uint, maximum float32) {
 
     sdl.GL_SwapWindow(window)
     flush_errors("swapped")
+    return nil
   })
 }

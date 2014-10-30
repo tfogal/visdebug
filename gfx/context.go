@@ -3,6 +3,7 @@ package gfx
 // #include <SDL2/SDL.h>
 // #include <SDL2/SDL_opengl.h>
 import "C"
+import "errors"
 import "../msg"
 import "github.com/go-gl/gl"
 import "github.com/veandco/go-sdl2/sdl"
@@ -23,13 +24,13 @@ func Main() {
 }
 
 // Execute a function in the gfx's thread.  Synchronous.
-func Exec(f func()) {
-  done := make(chan bool, 1)
+func Exec(f func() error) error {
+  done := make(chan error, 1)
   gfxfunc <- func() {
-    f()
-    done <- true
+    done <- f()
   }
-  <- done
+  err := <- done
+  return err
 }
 
 func Close() {
@@ -48,8 +49,8 @@ func poll() {
   }
 }
 
-func Context() {
-  Exec(func() {
+func Context() error {
+  return Exec(func() error {
     sdl.GL_SetAttribute(C.SDL_GL_CONTEXT_PROFILE_MASK,
                         C.SDL_GL_CONTEXT_PROFILE_CORE)
     sdl.GL_SetAttribute(C.SDL_GL_CONTEXT_MAJOR_VERSION, 3)
@@ -63,7 +64,7 @@ func Context() {
     sdl.GL_MakeCurrent(window, glctx)
 
     if gl.Init() != 0 {
-      panic("could not initialize GL")
+      return errors.New("could not initialize GL")
     }
 
     gl.ClearColor(0.1, 0.1, 0.3, 0.0)
@@ -71,5 +72,6 @@ func Context() {
     //surface := window.GetSurface()
     //rect := sdl.Rect { 0, 0, 200, 200 }
     //surface.FillRect(&rect, 0xffff0000)
+    return nil
   })
 }
