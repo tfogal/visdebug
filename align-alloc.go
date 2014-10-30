@@ -94,7 +94,7 @@ func (aa *AlignAlloc) free(inferior *ptrace.Tracee,
 
   // get the thing that is being freed.
   ptr := uintptr(stk.Arg1(inferior))
-  fmt.Printf("free(0x%x)\n", ptr)
+  aach.Trace("free(0x%x)\n", ptr)
 
   // look up that allocation info.
   alc := aa.alloc[ptr]
