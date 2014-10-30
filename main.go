@@ -83,6 +83,7 @@ var dyninfo bool
 var freespace bool
 var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
 var wintest bool
+var malloctrace bool
 func init() {
   runtime.LockOSThread()
   flag.BoolVar(&symlist, "symbols", false, "print out the symbol table")
@@ -93,6 +94,7 @@ func init() {
   flag.BoolVar(&dyninfo, "attach", false, "attach and print dynamic info")
   flag.BoolVar(&freespace, "free", false, "show maps and find first free space")
   flag.BoolVar(&wintest, "window", false, "run graphics / windowing test")
+  flag.BoolVar(&malloctrace, "mt", false, "trace 'malloc' calls")
 }
 
 func basename(s string) (string) {
@@ -138,6 +140,9 @@ func main() {
 
   if execute {
     interactive(argv)
+  }
+  if malloctrace {
+    newmallocs(argv)
   }
   if showmallocs {
     go mallocs(argv)
@@ -783,6 +788,31 @@ func castf32b(data []float32) []byte {
   hdr.Cap *= SIZEOF_F32
   dbyte := *(*[]byte)(unsafe.Pointer(&hdr))
   return dbyte
+}
+
+// starts up a new process, instrumented with our magic.
+// make sure you 'Close' the returned process!
+func instrument(argv []string) (*ptrace.Tracee, error) {
+  inferior, err := ptrace.Exec(argv[0], argv)
+  if err != nil {
+    return nil, fmt.Errorf("could not start '%s': %v\n", argv[0], err)
+  }
+  <- inferior.Events() // eat initial 'process is starting' notification.
+
+  if err := MainSync(argv[0], inferior) ; err != nil {
+    inferior.Close()
+    return nil, fmt.Errorf("main sync for '%s' failed: %v\n", argv[0], err)
+  }
+
+  tjfmalloc, err := setup_tjfmalloc(inferior)
+  if err != nil {
+    inferior.Close()
+    return nil, fmt.Errorf("tjfmalloc failure: %v\n", err)
+  }
+  tmalloc := bfd.MakeSymbol("__tjfmalloc", tjfmalloc, 0)
+  globals.symbols = append(globals.symbols, tmalloc)
+
+  return inferior, nil
 }
 
 // runs a program, replacing every 'malloc' in a program with
