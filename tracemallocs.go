@@ -24,9 +24,13 @@ func newmallocs(argv []string) {
     }
     switch iev := ievent.(type) {
     case trap:
-      mt.Trap(inferior, iev.iptr)
+      if err := ie.Trap(inferior, iev.iptr) ; err != nil {
+        log.Fatalf("error trapping 0x%x: %v\n", iev.iptr, err)
+      }
     case segfault:
-      mt.Segfault(inferior, iev.addr)
+      if err := ie.Segfault(inferior, iev.addr) ; err != nil {
+        log.Fatalf("error in segfault@0x%x handling: %v\n", iev.addr, err)
+      }
     default:
       log.Fatalf("unexpected event: %v\n", iev)
     }
