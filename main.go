@@ -819,25 +819,19 @@ func instrument(argv []string) (*ptrace.Tracee, error) {
 // 'tjfmalloc'---a faux malloc implementation that forwards to
 // posix_memalign && mprotect.
 func mallocs(argv []string) {
-  inferior, err := ptrace.Exec(argv[0], argv)
+  inferior, err := instrument(argv)
   if err != nil {
     log.Fatalf("could not start program: %v", err)
   }
-  <- inferior.Events() // eat initial 'process is starting' notification.
   defer inferior.Close()
-
-  if err := MainSync(argv[0], inferior) ; err != nil {
-    fmt.Printf("main sync failed: %v\n", err)
-    return
-  }
 
   symmalloc := symbol("malloc", globals.symbols)
   if symmalloc == nil {
     log.Fatalf("Binary does not have 'malloc'.  Giving up.\n")
     return
   }
-  tjfmalloc, err := setup_tjfmalloc(inferior)
-  if err != nil {
+  tjfmalloc := symbol("__tjfmalloc", globals.symbols)
+  if tjfmalloc == nil {
     log.Fatalf("could not setup replacement malloc: %v\n", err)
     return
   }
@@ -895,7 +889,7 @@ func mallocs(argv []string) {
           }
         }
 
-        if err := inferior.SetIPtr(tjfmalloc); err != nil {
+        if err := inferior.SetIPtr(tjfmalloc.Address()); err != nil {
           log.Fatalf("jumping to tjfmalloc: %v\n", err)
         }
 
