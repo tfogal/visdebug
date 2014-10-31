@@ -53,7 +53,7 @@ func flush_errors(pre string) {
 }
 
 type Scalar2D interface {
-  Pre()
+  Pre() error
   Render(data []float32, dims []uint, maximum float32)
   Post()
 }
@@ -111,8 +111,8 @@ func s2dprogram() gl.Program {
 
 // creates the static data / OGL objects we need.  Must be called before
 // 'Render'.
-func (s s2d) Pre() {
-  Exec(func() error {
+func (s s2d) Pre() error {
+  return Exec(func() error {
     flush_errors("pre: start")
     s.vao = gl.GenVertexArray()
     s.vao.Bind()
