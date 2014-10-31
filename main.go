@@ -78,26 +78,24 @@ func assert(condition bool) {
 var symlist bool
 var execute bool
 var dotcfg bool
-var showmallocs bool
 var dyninfo bool
 var freespace bool
 var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
-var wintest bool
 var malloctrace bool
 var memhandle bool
+var vis2d bool
 func init() {
   runtime.LockOSThread()
   flag.BoolVar(&symlist, "symbols", false, "print out the symbol table")
   flag.BoolVar(&symlist, "s", false, "print out the symbol table")
   flag.BoolVar(&execute, "x", false, "execute subprogram")
   flag.BoolVar(&dotcfg, "cfg", false, "compute and print CFG")
-  flag.BoolVar(&showmallocs, "mallocs", false, "trace and report mallocs")
   flag.BoolVar(&dyninfo, "attach", false, "attach and print dynamic info")
   flag.BoolVar(&freespace, "free", false, "show maps and find first free space")
-  flag.BoolVar(&wintest, "window", false, "run graphics / windowing test")
   flag.BoolVar(&malloctrace, "mt", false, "trace 'malloc' calls")
   flag.BoolVar(&memhandle, "dbg", false, "instrument, adding checks for " +
                                          "invalid memory handling")
+  flag.BoolVar(&vis2d, "v2d", false, "visualize 2D data")
 }
 
 func basename(s string) (string) {
@@ -150,35 +148,27 @@ func main() {
     var mt MallocTrace
     newmallocs(argv, &mt)
   }
-//  if my new stuff ... {
-//    var vmem visualmem2D
-//    go func() {
-//      if err := gfx.Context() ; err != nil { // establish OGL stuff.
-//        evc.Trace("Could not establish context: %v, skipping..\n", err)
-//      }
-//      defer gfx.Close()
-//      go newmallocs(argv, &vmem)
-//    }
-//    gfx.Main()
-//  }
+  if vis2d {
+    var vmem visualmem2D
+    go func() { // gfx stuff needs to go into another thread.
+      if err := gfx.Context() ; err != nil { // establish OGL stuff.
+        evc.Trace("Could not establish context: %v, skipping..\n", err)
+      }
+      newmallocs(argv, &vmem)
+      gfx.Close()
+    }()
+    gfx.Main()
+  }
 
   if memhandle {
     var aa AlignAlloc
     newmallocs(argv, &aa)
-  }
-  if showmallocs {
-    go mallocs(argv)
-    gfx.Main()
   }
   if dyninfo {
     print_address_info(argv)
   }
   if freespace {
     show_free_space(argv)
-  }
-  if wintest {
-    go window_test()
-    gfx.Main()
   }
 }
 
@@ -210,27 +200,6 @@ func normalize(arr []float32) {
   for i := range arr {
     arr[i] /= maximum
   }
-}
-
-func window_test() {
-  gfx.Context()
-  {
-    garbage := []float32{
-      0.00,  5.31,  09.139,
-      9.00, 12.31,  08.124,
-    }
-    fmt.Printf("gbg: %v\n", garbage)
-    // columns, rows
-    dims := make([]uint, 2)
-    dims[0] = 3; dims[1] = 2
-    sfield := gfx.ScalarField2D()
-    sfield.Pre()
-    mx := maxf(garbage)
-    sfield.Render(garbage, dims, mx)
-    sfield.Render(garbage, dims, mx)
-    sfield.Post()
-  }
-  gfx.Close()
 }
 
 func interactive(argv []string) {
