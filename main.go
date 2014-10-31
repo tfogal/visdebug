@@ -181,26 +181,6 @@ func maxf(arr []float32) float32 {
   }
   return mx
 }
-func minf(arr []float32) float32 {
-  mn := float32(42.42424242)
-  for _, v := range arr {
-    if v < mn {
-      mn = v
-    }
-  }
-  return mn
-}
-
-func normalize(arr []float32) {
-  minimum := minf(arr)
-  for i := range arr{
-    arr[i] = (arr[i] - minimum)
-  }
-  maximum := maxf(arr)
-  for i := range arr {
-    arr[i] /= maximum
-  }
-}
 
 func interactive(argv []string) {
   proc, err := ptrace.Exec(argv[0], argv)
@@ -260,12 +240,6 @@ func symbol(symname string, symbols []bfd.Symbol) *bfd.Symbol {
   return nil
 }
 
-func iptr(inf *ptrace.Tracee) uintptr {
-  addr, err := inf.GetIPtr()
-  if err != nil { log.Fatalf(err.Error()) }
-  return addr
-}
-
 // Lets the inferior run until it hits 'main'.  We mostly use this to bypass
 // all the application startup stuff (e.g. loading libc).  Afterwards, we can
 // read symbols from the process and they'll have valid addresses.
@@ -302,20 +276,20 @@ func MainSync(program string, inferior *ptrace.Tracee) error {
   return nil
 }
 
-// A StackReader reads information from the inferior's stack.  This is used for
-// reading arguments of functions, as well as their return values.
-// Implementations are ABI-specific.
+// A FuncABI reads and writes information from the inferior's stack.
+// This is used for reading arguments of functions, as well as their
+// return values.  Implementations are ABI-specific.
 // Typing is often not accurately represented.  For example, the
 // first argument to 'malloc' is best modelled as Go's uint, whereas
 // the first argument to 'strlen' is best modelled as Go's uintptr.
-// Thus we use uint64's often, here, and expect users to cast.
-type StackReader interface {
+// We use uint64s here and expect users to cast.
+type FuncABI interface {
   Arg1(*ptrace.Tracee) uint64
   SetArg1(*ptrace.Tracee, uint64) error
   RetAddr(*ptrace.Tracee) uintptr
   RetVal(*ptrace.Tracee) uint64
 }
-// x86_64 is a StackReader implementation which conforms to the x86-64 ABI.
+// x86_64 is a FuncABI implementation which conforms to the x86-64 ABI.
 type x86_64 struct {}
 // the x86-64 ABI places the first integer argument in RDI.
 func (x86_64) Arg1(inferior *ptrace.Tracee) uint64 {
@@ -391,7 +365,6 @@ func (asm x86_64) RetAddr(inferior *ptrace.Tracee) uintptr {
   return asm.RetAddrMid(inferior)
 }
 
-
 // the x86-64 ABI places the return value in RAX.
 func (x86_64) RetVal(inferior *ptrace.Tracee) uint64 {
   regs, err := inferior.GetRegs()
@@ -452,37 +425,11 @@ func setup_tjfmalloc(inferior *ptrace.Tracee) (uintptr, error) {
   return addr, nil
 }
 
-// creates a function that allows us to change a memory region's protection.
-// ... actually, this isn't used.  Since it's just a single call to mprotect,
-// we just do it by hacking the registers/stack to be what we want.  See the
-// 'allow' function.
-func setup_unprotect(inferior *ptrace.Tracee) (uintptr, error) {
-  addr, err := getpage(inferior)
-  if err != nil {
-    return 0x0, err
-  }
-
-  if err := verify_symbols_loaded(inferior) ; err != nil {
-    return 0x0, err
-  }
-  mprot := symbol("mprotect", globals.symbols)
-  if mprot == nil {
-    return 0x0, errors.New("'mprotect' not in symbol list!")
-  }
-
-  _, err = fill_unprotect(inferior, addr, mprot.Address())
-  if err != nil {
-    return 0x0, err
-  }
-
-  return addr, nil
-}
-
-const (
-  PROT_NONE = 0x0
-  PROT_READ = 0x1
-  PROT_WRITE = 0x2
-  PROT_EXEC = 0x4
+const(
+  prot_NONE = 0x0
+  prot_READ = 0x1
+  prot_WRITE = 0x2
+  prot_EXEC = 0x4
 )
 
 // like 'mprotect', but changes the inferior's memory protections, not ours.
@@ -571,14 +518,14 @@ func iprotect(inferior *ptrace.Tracee, addr uintptr, len uint,
 // RETTARGET is where you'd like the inferior to return to.
 func allow(inferior *ptrace.Tracee, addr uintptr, len uint,
            rettarget uintptr) error {
-  return iprotect(inferior, addr, len, PROT_READ|PROT_WRITE, rettarget)
+  return iprotect(inferior, addr, len, prot_READ|prot_WRITE, rettarget)
 }
 
 // Forces the inferior to PROT_READ a given chunk of memory.
 // RETTARGET is where you'd like the inferior to return to.
 func deny(inferior *ptrace.Tracee, addr uintptr, len uint,
           rettarget uintptr) error {
-  return iprotect(inferior, addr, len, PROT_READ, rettarget)
+  return iprotect(inferior, addr, len, prot_READ, rettarget)
 }
 
 // An allocation that the inferior has performed.
@@ -597,30 +544,6 @@ func (a allocation) begin() uintptr { return a.base }
 func (a allocation) end() uintptr { return a.base+uintptr(a.lpage) }
 func (a allocation) String() string {
   return fmt.Sprintf("alloc(%d[%d]) -> 0x%08x", a.length, a.lpage, a.base)
-}
-
-func find_alloc(vmem []visualmem, addr uintptr) (allocation, error) {
-  for _, vm := range vmem {
-    alc := vm.alloc
-    if alc.begin() <= addr && addr <= alc.end() {
-      return alc, nil
-    }
-  }
-  return allocation{}, fmt.Errorf("allocation 0x%0x not found", addr)
-}
-
-// Inserts a breakpoint at the exit to the current function.
-func breakexit(inferior *ptrace.Tracee) (debug.Breakpoint, error) {
-  var stk x86_64
-  fmt.Printf("inserting BP @ exit.\n")
-  retsite := stk.RetAddr(inferior)
-
-  bp, err := debug.Break(inferior, retsite)
-  if err != nil {
-    return debug.Breakpoint{}, err
-  }
-
-  return bp, nil
 }
 
 // an inferior event is some 'asynchronous' action that happens in the inferior.
@@ -741,29 +664,6 @@ func find_opcode(opcode x86asm.Op, inferior *ptrace.Tracee,
   return 0x0, errors.New("instruction never found")
 }
 
-type visualmem struct {
-  gsfield gfx.Scalar2D
-  data []float32
-  dims []uint
-  alloc allocation
-}
-
-func (v visualmem) String() string {
-  return fmt.Sprintf("visual mem: %v %v", v.alloc, v.dims)
-}
-
-func castf(data []byte) []float32 {
-  const SIZEOF_F32 = 4
-  if len(data) % SIZEOF_F32 != 0 {
-    log.Fatalf("byte array is not a multiple of float size!\n")
-  }
-  hdr := *(*reflect.SliceHeader)(unsafe.Pointer(&data))
-  hdr.Len /= SIZEOF_F32
-  hdr.Cap /= SIZEOF_F32
-  dataf32 := *(*[]float32)(unsafe.Pointer(&hdr))
-  return dataf32
-}
-
 // disgusting function to copy from a byte-slice-of-floats to an
 // actual-slice-of-floats.  We need this because syscall.Ptrace*'s reads are
 // broken, they should give an interface but give the byte array nonsense
@@ -806,210 +706,6 @@ func instrument(argv []string) (*ptrace.Tracee, error) {
   globals.symbols = append(globals.symbols, tmalloc)
 
   return inferior, nil
-}
-
-// runs a program, replacing every 'malloc' in a program with
-// 'tjfmalloc'---a faux malloc implementation that forwards to
-// posix_memalign && mprotect.
-func mallocs(argv []string) {
-  inferior, err := instrument(argv)
-  if err != nil {
-    log.Fatalf("could not start program: %v", err)
-  }
-  defer inferior.Close()
-
-  symmalloc := symbol("malloc", globals.symbols)
-  if symmalloc == nil {
-    log.Fatalf("Binary does not have 'malloc'.  Giving up.\n")
-    return
-  }
-  tjfmalloc := symbol("__tjfmalloc", globals.symbols)
-  if tjfmalloc == nil {
-    log.Fatalf("could not setup replacement malloc: %v\n", err)
-    return
-  }
-
-  // start by inserting a bp for malloc.
-  mallocbp, err := debug.Break(inferior, symmalloc.Address())
-  if err != nil {
-    log.Fatalf("could not insert initial 'malloc' breakpoint: %v\n", err)
-  }
-
-  var retbp debug.Breakpoint // breakpoint for where/when malloc returns
-  type maccess struct { // keeping track of an access we have allowed, will deny
-    bp debug.Breakpoint
-    alloc allocation
-  }
-  var access maccess
-
-  // establish our OGL stuff.
-  if err := gfx.Context() ; err != nil {
-    log.Fatalf("GL init error: %v\n", err)
-  }
-  defer gfx.Close()
-
-  updates := uint(0)
-
-  var vm visualmem
-  vmem := make([]visualmem, 0)
-  for {
-    ievent, err := ihandle(inferior)
-    if err == io.EOF {
-      break
-    } else if err != nil {
-      log.Fatalf("ihandle event: %v\n", err)
-    }
-    switch iev := ievent.(type) {
-    case trap:
-      var stk x86_64
-      // but what did we hit?
-      if iev.iptr == symmalloc.Address() { // hit malloc.
-        // record the size of the alloc.
-        vm.alloc.length = uint(stk.Arg1(inferior))
-        vm.alloc.lpage = uint64(vm.alloc.length)
-
-        // remove the BP
-        if err := debug.Unbreak(inferior, mallocbp) ; err != nil {
-          log.Fatalf("could not remove malloc BP: %v\n", err)
-        }
-
-        // "upgrade" the size of the allocation so that it always ends on a
-        // page boundary.
-        if ((4096-1) & vm.alloc.length) != 0 {
-          vm.alloc.lpage = uint64(int64(vm.alloc.length + 4096) & ^(4096-1))
-          inject.Trace("upgrading %d-byte allocation to %d bytes\n",
-                       uint(stk.Arg1(inferior)), vm.alloc.lpage)
-          if err := stk.SetArg1(inferior, vm.alloc.lpage) ; err != nil {
-            log.Fatalf("could not bump up allocation size: %v\n", err)
-          }
-        }
-
-        if err := inferior.SetIPtr(tjfmalloc.Address()); err != nil {
-          log.Fatalf("jumping to tjfmalloc: %v\n", err)
-        }
-
-        // insert a breakpoint at the retval so we can record the return value
-        retbp, err = breakexit(inferior)
-        if err != nil {
-          log.Fatalf("inserting breakpoint for malloc return site: %v\n", err)
-        }
-      } else if iev.iptr == retbp.Address { // coming back from a malloc.
-        // remove the BP.
-        if err := debug.Unbreak(inferior, retbp) ; err != nil {
-          log.Fatalf("could not remove malloc-ret BP: %v\n", err)
-        }
-
-        // re-insert the malloc breakpoint.
-        mallocbp, err = debug.Break(inferior, symmalloc.Address())
-        if err != nil {
-          log.Fatalf("could not re-insert malloc bp: %v\n", err)
-        }
-
-        // reset the correct argument, in case it's reused for something else
-        if err := stk.SetArg1(inferior, uint64(vm.alloc.length)) ; err != nil {
-          log.Fatalf("error resetting malloc size argument: %v\n", err)
-        }
-
-        vm.alloc.base = uintptr(stk.RetVal(inferior))
-        fmt.Printf("[sup] %v @ 0x%x\n", vm.alloc, iev.iptr)
-        vm.gsfield = gfx.ScalarField2D()
-        vm.gsfield.Pre()
-        var f32 float32
-        vm.data = make([]float32, vm.alloc.length/uint(unsafe.Sizeof(f32)))
-        vmem = append(vmem, vm)
-      } else if iev.iptr == access.bp.Address { // done w/ fqn that needs allow
-        protection.Trace("hit access BP @ 0x%x\n", iev.iptr)
-        if err := debug.Unbreak(inferior, access.bp) ; err != nil {
-          log.Fatalf("could not remove access BP: %v\n", err)
-        }
-        access.bp.Address = 0x0 // make sure it's not re-used.
-
-        err := deny(inferior, access.alloc.base, uint(access.alloc.lpage),
-                    iev.iptr)
-        if err != nil {
-          log.Fatalf("could not revoke perms for: %v\n", err)
-        }
-
-        if vm.dims != nil && len(vm.dims) == 2 && updates % 10 == 0 {
-          updates = 0
-          // todo/bad: don't use 'vm' here, that assumes the most recent memory
-          // is the one of interest here, which might not be true.
-          bslice := castf32b(vm.data)  // for Read; see castf32b comment.
-          if err := inferior.Read(vm.alloc.base, bslice) ; err != nil {
-            log.Fatalf("could not read inferior's data: %v\n", err)
-          }
-          mx := maxf(vm.data)
-          vm.gsfield.Render(vm.data, vm.dims, mx)
-        }
-        updates++
-      }
-    case segfault:
-      var stk x86_64
-      alc, err := find_alloc(vmem, iev.addr)
-      if err != nil {
-        fmt.Printf("searching for alloc in %d-elem list (%v)\n", len(vmem), err)
-        fmt.Printf("alloc list: %v\n", vmem)
-        rs := stk.RetAddr(inferior)
-        log.Fatalf("alloc not found in %d-elem list\ninferior SIGSEGV'd at:" +
-                   "0x%0x -> 0x%0x\n", len(vmem), iev.addr, rs)
-      }
-      iptr, err := inferior.GetIPtr()
-      if err != nil {
-        log.Fatalf("no iptr: %v\n", err)
-      }
-      protection.Trace("accessed allocation 0x%0x--0x%0x (0x%0x)\n" +
-                       "Allowing it and returning to 0x%0x\n",
-                       alc.begin(), alc.end(), iev.addr, iptr)
-      if err := inferior.ClearSignal() ; err != nil {
-        log.Fatalf("could not clear segv: %v\n", err)
-      }
-      if err := allow(inferior, alc.base, uint(alc.lpage), iptr) ; err != nil {
-        log.Fatalf("could not allow 0x%0x: %v\n", alc.base, err)
-      }
-      access.alloc = alc
-
-      protection.Trace("Access was allowed. Now searching for a place to " +
-                       "insert a breakpoint to re-enable memory protection.")
-
-      // Our logic for Top vs. Mid in RetAddr is invalid in this case: we
-      // *know* we're at the start of the fqn (we just hit a BP!), but the
-      // current instruction is unlikely to be a 'push' or 'ret'---in fact,
-      // it's basically guaranteed not to be, since we've likely paused at
-      // some @plt symbol, and those do not perform normal ABI stack handling.
-      raddr := stk.RetAddrTop(inferior)
-      access.bp, err = debug.Break(inferior, raddr)
-      if err != nil {
-        protection.Trace("can't find retaddr from insn 0x%0x: %v\n", raddr, err)
-        raddr = stk.RetAddrMid(inferior)
-        access.bp, err = debug.Break(inferior, raddr)
-        if err != nil {
-          protection.Warning("both stack lookups failed us.  2nd: %v\n", err)
-          protection.Trace("Will attempt to find a RET insn, instead.\n")
-          access.bp, err = break_ret(inferior)
-          if err != nil {
-            log.Fatalf("could not find a place to re-enable memory " +
-                       "protection! %v\n", err)
-          }
-        }
-      }
-
-      dims, err := bounds(argv[0], inferior)
-      if err != nil {
-        log.Printf("error getting bounds: %v\n", err)
-        // just skip this, then.  this might happen when accessing data outside
-        // a loop, or e.g. as calloc does.
-        continue
-      }
-      protection.Trace("got bounds: %v\n", dims)
-      vm.dims = dims
-    default:
-      log.Fatalf("unhandled event type: %v\n", iev)
-    }
-  }
-  for _, v := range vmem {
-    v.gsfield.Post()
-  }
-  fmt.Printf("[sup] inferior (%d) terminated.\n", inferior.PID())
 }
 
 // Find the function's 'ret' instruction and insert a breakpoint there.

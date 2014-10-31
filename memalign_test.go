@@ -48,35 +48,6 @@ func TestAllocInferior(t *testing.T) {
   <- inferior.Events() // let it finish.
 }
 
-// Tests filling memory with the 'unprotect' function.
-func TestSetupUnprotect(t *testing.T) {
-  argv := []string{"testprograms/dimensional", "3"}
-  inferior, err := startup(argv)
-  if err != nil {
-    t.Fatalf("can't exec child: %v", err)
-  }
-  defer inferior.Close()
-
-  symbols, err := bfd.SymbolsProcess(inferior)
-  if err != nil {
-    t.Fatalf("could not read symbols: %v\n", err)
-  }
-
-  addr, err := setup_unprotect(inferior)
-  if err != nil {
-    t.Fatalf("could not define 'unprotect' function: %v", err)
-  }
-
-  if addr < symbol("main", symbols).Address() {
-    t.Fatalf("address 0x%0x makes no sense", addr)
-  }
-
-  if err := inferior.Continue() ; err != nil {
-    t.Fatalf("could not finish program: %v", err)
-  }
-  <- inferior.Events() // let it finish.
-}
-
 func TestExecFill(t *testing.T) {
   argv := []string{"testprograms/dimensional", "3"}
   inferior, err := startup(argv)
@@ -152,7 +123,7 @@ func TestAllowDeny(t *testing.T) {
   if err != nil {
     t.Fatalf("allow1: %v\n", err)
   }
-  err = iprotect(inferior, alc.base, alc.length, PROT_EXEC, iptr)
+  err = iprotect(inferior, alc.base, alc.length, prot_EXEC, iptr)
   if err != nil {
     t.Fatalf("allow1: %v\n", err)
   }
