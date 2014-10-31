@@ -22,13 +22,6 @@ func (t Type) Signed() bool {
 
 func type_signed(typ dwarf.Type) bool {
   switch {
-  case strings.Contains(typ.String(), "float"),
-       strings.Contains(typ.String(), "double"),
-       strings.Contains(typ.String(), "int8_t"),
-       strings.Contains(typ.String(), "int16_t"),
-       strings.Contains(typ.String(), "int32_t"),
-       strings.Contains(typ.String(), "int64_t"):
-    return true
   case strings.Contains(typ.String(), "size_t"),
        strings.Contains(typ.String(), "uint8_t"),
        strings.Contains(typ.String(), "uint16_t"),
@@ -36,6 +29,13 @@ func type_signed(typ dwarf.Type) bool {
        strings.Contains(typ.String(), "uint64_t"),
        strings.Contains(typ.String(), "unsigned"):
     return false
+  case strings.Contains(typ.String(), "float"),
+       strings.Contains(typ.String(), "double"),
+       strings.Contains(typ.String(), "int8_t"),
+       strings.Contains(typ.String(), "int16_t"),
+       strings.Contains(typ.String(), "int32_t"),
+       strings.Contains(typ.String(), "int64_t"):
+    return true
   default:
     panic("unknown type")
   }

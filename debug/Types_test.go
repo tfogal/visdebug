@@ -17,7 +17,7 @@ func TestTypeGlobalMidArray(t *testing.T) {
 }
 
 func TestTypeArg(t *testing.T) {
-  typ, err := TypeLocal(program[0], "smooth3", -96)
+  typ, err := TypeLocal(program[0], "smooth3", -128) // first local, 'k'
   if err != nil {
     t.Fatalf("%v", err)
   }
@@ -44,9 +44,9 @@ var lvtests = []tstlvarinfo{
   {"smooth3", - 88, false},
   {"smooth3", - 96, false},
   {"smooth3", -104, false},
-  {"smooth3", -112, true},
-  {"smooth3", -120, true},
-  {"smooth3", -128, true},
+  {"smooth3", -112, false},
+  {"smooth3", -120, false},
+  {"smooth3", -128, false},
   {"smooth3", -144, true}, // formal parameter, i.e. 'v'
   {"smooth2", - 56, true},
   {"smooth2", - 40, false},
