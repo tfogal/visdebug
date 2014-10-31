@@ -133,7 +133,11 @@ func (be *BaseEvent) Segfault(inferior *ptrace.Tracee, access uintptr) error {
 
 func (be *BaseEvent) AddWatch(inferior *ptrace.Tracee, pages allocation,
                               cb SFcb) error {
-  err := deny(inferior, pages.base, uint(pages.lpage), whereis(inferior))
+  iptr, err := inferior.GetIPtr()
+  if err != nil {
+    return fmt.Errorf("don't know where we are: %v", err)
+  }
+  err = deny(inferior, pages.base, uint(pages.lpage), iptr)
   if err != nil {
     return fmt.Errorf("can't deny 0x%x+%d: %v", pages.base, pages.lpage, err)
   }
