@@ -554,7 +554,7 @@ func iprotect(inferior *ptrace.Tracee, addr uintptr, len uint,
   // inferior.  Save what's there now so that we can restore it when we're done.
   oretaddr, err := inferior.ReadWord(uintptr(regs.Rsp))
   if err != nil {
-    return fmt.Errorf("could not save retaddr: %v\n", err)
+    return fmt.Errorf("could not save retaddr: %v", err)
   }
 
   // now we can fill in our custom return address.
@@ -576,9 +576,9 @@ func iprotect(inferior *ptrace.Tracee, addr uintptr, len uint,
     if err == debug.ErrSegFault {
       sig, err := inferior.GetSiginfo()
       if err != nil {
-        return fmt.Errorf("error getting segfault reason: %v\n", err)
+        return fmt.Errorf("error getting segfault reason: %v", err)
       }
-      return fmt.Errorf("segfault@0x%x \n", sig.Addr)
+      return fmt.Errorf("segfault@0x%x", sig.Addr)
     }
     return fmt.Errorf("did not return to target 0x%0x: %v", rettarget, err)
   }
@@ -668,7 +668,7 @@ type segfault struct {
 // inferior.Continue,
 func ihandle(inferior *ptrace.Tracee) (ievent, error) {
   if err := inferior.Continue() ; err != nil {
-    return nil, err
+    return nil, fmt.Errorf("continuing gave us an error: %v", err)
   }
   stat := <- inferior.Events()
   status := stat.(syscall.WaitStatus)
@@ -707,8 +707,10 @@ func ihandle(inferior *ptrace.Tracee) (ievent, error) {
     return trap{iptr: ptr}, nil
   case status.CoreDump():
     return nil, errors.New("abnormal termination (core dumped)")
+  case status.Continued():
+    return nil, fmt.Errorf("continued?  wtf? %v", status)
   }
-  return status, errors.New("unknown case!")
+  return status, fmt.Errorf("unknown wait status: %v", status)
 }
 
 // jumps can have many argument types, handle them appropriately.
