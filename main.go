@@ -146,7 +146,7 @@ func main() {
   }
   if malloctrace {
     var mt MallocTrace
-    newmallocs(argv, &mt)
+    supervise(argv, &mt)
   }
   if vis2d {
     var vmem visualmem2D
@@ -154,7 +154,7 @@ func main() {
       if err := gfx.Context() ; err != nil { // establish OGL stuff.
         evc.Trace("Could not establish context: %v, skipping..\n", err)
       }
-      newmallocs(argv, &vmem)
+      supervise(argv, &vmem)
       gfx.Close()
     }()
     gfx.Main()
@@ -162,7 +162,7 @@ func main() {
 
   if memhandle {
     var aa AlignAlloc
-    newmallocs(argv, &aa)
+    supervise(argv, &aa)
   }
   if dyninfo {
     print_address_info(argv)

@@ -8,7 +8,7 @@ import(
 
 var evc = msg.StdChan()
 
-func newmallocs(argv []string, ie InferiorEvent) {
+func supervise(argv []string, ie InferiorEvent) {
   inferior, err := instrument(argv)
   if err != nil {
     evc.Error("err starting program: %v\n", err)
