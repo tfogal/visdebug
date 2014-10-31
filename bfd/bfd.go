@@ -75,6 +75,9 @@ type Symbol struct {
   addr uintptr
   flags uint
 }
+func (s Symbol) String() string {
+  return fmt.Sprintf("{%s 0x%x %d}", s.name, s.addr, s.flags)
+}
 func MakeSymbol(name string, addr uintptr, flags uint) Symbol {
   return Symbol{name: name, addr: addr, flags: flags}
 }
