@@ -84,7 +84,7 @@ func (be *BaseEvent) AddBP(inferior *ptrace.Tracee, addr uintptr,
 
 func (be *BaseEvent) DropBP(inferior *ptrace.Tracee, addr uintptr) error {
   if err := debug.Unbreak(inferior, be.bp[addr].bp) ; err != nil {
-    return err
+    return fmt.Errorf("unbreak failed: %v", err)
   }
   // remove the BP from our list.
   delete(be.bp, addr)
@@ -97,10 +97,10 @@ func (be *BaseEvent) Trap(inferior *ptrace.Tracee, addr uintptr) error {
   // breakpoint to be persistent, they need to setup a mechanism by which it
   // will get re-inserted.
   if err := be.DropBP(inferior, addr) ; err != nil {
-    return err
+    return fmt.Errorf("error dropping BP@0x%x: %v", addr, err)
   }
   if err := bpinfo.cb(inferior, be.bp[addr].bp) ; err != nil {
-    return err
+    return fmt.Errorf("callback error: %v", err)
   }
   return nil
 }
@@ -112,7 +112,7 @@ func find_sf(addrs map[uintptr]sfelem, access uintptr) (sfelem, error) {
       return fault, nil
     }
   }
-  return sfelem{}, fmt.Errorf("allocation 0x%0x not found", access)
+  return sfelem{}, fmt.Errorf("Allocation 0x%0x not found", access)
 }
 
 func (be *BaseEvent) Segfault(inferior *ptrace.Tracee, access uintptr) error {
@@ -154,4 +154,12 @@ func (be *BaseEvent) DropWatch(inferior *ptrace.Tracee,
   }
   delete(be.sf, pages.base)
   return nil
+}
+
+func (be *BaseEvent) printAllocs(prefix string) {
+  fmt.Printf("%s (%d elems)\n", prefix, len(be.sf))
+  for i, sfe := range be.sf {
+    alc := sfe.alloc
+    fmt.Printf("%2d 0x%x: %v\n", i, alc.base, alc)
+  }
 }

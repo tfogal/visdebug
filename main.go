@@ -71,6 +71,7 @@ func readsymbols(filename string) {
 
 func assert(condition bool) {
   if condition == false {
+    os.Stdout.Sync()
     panic("assertion failure")
   }
 }
@@ -499,16 +500,13 @@ func iprotect(inferior *ptrace.Tracee, addr uintptr, len uint,
     return fmt.Errorf("did not return to target 0x%0x: %v", rettarget, err)
   }
 
-  protection.Trace("%d on 0x%0x--0x%0x. ", prot, addr, addr+uintptr(len))
-  // I'm so hilarious:
-  protection.Trace("Now back to your regularly scheduled programming.")
+  protection.Trace("%d on 0x%0x--0x%0x. SP: 0x%x -> 0x%x", prot, addr,
+                   addr+uintptr(len), rettarget, oretaddr)
+  // Now back to your regularly scheduled programming.
   if err := inferior.SetRegs(orig_regs) ; err != nil { // restore registers.
     return err
   }
-  protection.Trace("restoring SP: 0x%x -> 0x%08x @ 0x%x\n", rettarget,
-                   oretaddr, uintptr(orig_regs.Rsp))
   if err := inferior.WriteWord(uintptr(orig_regs.Rsp), oretaddr) ; err != nil {
-
     return err
   }
   return nil
@@ -586,7 +584,7 @@ func ihandle(inferior *ptrace.Tracee) (ievent, error) {
                      iptr-symb.Address(), iptr)
 
     return segfault{addr: sig.Addr}, nil
-  case status.StopSignal() == syscall.SIGTRAP:
+  case status.Stopped() && status.StopSignal() == syscall.SIGTRAP:
     // back up once so the trap iptr makes sense and we can restart our insn
     if err := debug.Stepback(inferior) ; err != nil {
       return nil, err
@@ -601,6 +599,8 @@ func ihandle(inferior *ptrace.Tracee) (ievent, error) {
     return nil, errors.New("abnormal termination (core dumped)")
   case status.Continued():
     return nil, fmt.Errorf("continued?  wtf? %v", status)
+  case status.Stopped():
+    return nil, fmt.Errorf("trapped, not from BP: %v", status.TrapCause())
   }
   return status, fmt.Errorf("unknown wait status: %v", status)
 }
