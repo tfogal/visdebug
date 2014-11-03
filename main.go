@@ -85,6 +85,7 @@ var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
 var malloctrace bool
 var memhandle bool
 var vis2d bool
+var minsize uint
 func init() {
   runtime.LockOSThread()
   flag.BoolVar(&symlist, "symbols", false, "print out the symbol table")
@@ -97,6 +98,7 @@ func init() {
   flag.BoolVar(&memhandle, "dbg", false, "instrument, adding checks for " +
                                          "invalid memory handling")
   flag.BoolVar(&vis2d, "v2d", false, "visualize 2D data")
+  flag.UintVar(&minsize, "size", 0, "allocation size to threshold")
 }
 
 func basename(s string) (string) {
@@ -125,7 +127,7 @@ func main() {
 
   // we're not running anything yet, and might not ever depending on the option
   // given, so we need to leave symbols nil and fill it in later.
-  globals = CmdGlobal{program: argv[0], symbols: nil}
+  globals = CmdGlobal{program: argv[0], symbols: nil, minsize: minsize}
 
   if symlist {
     readsymbols(argv[0]);

@@ -26,6 +26,7 @@ type CmdGlobal struct {
   program string // the filename for the program we are running
   symbols []bfd.Symbol // the list of symbols from the process
   symbolsAddr []bfd.Symbol // list of symbols, sorted by address.
+  minsize uint
 }
 
 // initialization info that commands might want to use.
