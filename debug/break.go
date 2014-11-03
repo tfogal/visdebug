@@ -31,6 +31,11 @@ func Break(inferior *ptrace.Tracee, address uintptr) (Breakpoint, error) {
     return Breakpoint{}, fmt.Errorf("reading 0x%0x: %v", address, err)
   }
 
+  // experimental test.  does this happen in practice?
+  if (bp.insn & (^uint64(imask))) ==  0xcc {
+    return Breakpoint{}, errors.New("there is already a BP there!")
+  }
+
   bpinsn := (bp.insn & imask) | 0xcc // 0xcc is "the" breakpoint opcode.
 
   // overwrite with breakpoint (0xcc)
