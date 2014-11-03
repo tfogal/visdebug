@@ -335,7 +335,8 @@ func (x86_64) RetAddrMid(inferior *ptrace.Tracee) uintptr {
   }
   retaddr, err := inferior.ReadWord(uintptr(regs.Rbp+8))
   if err != nil {
-    log.Fatalf("could not read 0x%0x: %v\n", uintptr(regs.Rbp+8), err)
+    log.Printf("could not read 0x%0x: %v\n", uintptr(regs.Rbp+8), err)
+    return 0x0
   }
   return uintptr(retaddr)
 }
