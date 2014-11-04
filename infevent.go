@@ -122,11 +122,11 @@ func (be *BaseEvent) Segfault(inferior *ptrace.Tracee, access uintptr) error {
   }
 
   if err := be.DropWatch(inferior, sfinfo.alloc) ; err != nil {
-    return err
+    return fmt.Errorf("error dropping watch: %v", err)
   }
 
   if err := sfinfo.cb(inferior, sfinfo.alloc) ; err != nil {
-    return err
+    return fmt.Errorf("cb error: %v", err)
   }
   return nil
 }
