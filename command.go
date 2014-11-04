@@ -992,6 +992,7 @@ func rfaddr(insns []register_file, addr uintptr) register_file {
 func bind_identify(fqn string, node *cfg.Node,
                    inferior *ptrace.Tracee) ([]uint, error) {
   dims := make([]uint, 0)
+  assert(len(node.Headers) <= 1) // seems to always be the case.  need loop?
   for _, hdr := range node.Headers {
     if !hdr.LoopHeader() { panic("non-header in header list!") }
 
