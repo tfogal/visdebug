@@ -74,6 +74,9 @@ func (be *BaseEvent) printBPs() {
 
 func (be *BaseEvent) AddBP(inferior *ptrace.Tracee, addr uintptr,
                            cb BPcb) error {
+  if be.bp[addr].cb != nil {
+    panic("trying to replace an existing BP!")
+  }
   bp, err := debug.Break(inferior, addr)
   if err != nil {
     return err
