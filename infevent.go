@@ -102,7 +102,7 @@ func (be *BaseEvent) Trap(inferior *ptrace.Tracee, addr uintptr) error {
   if err := be.DropBP(inferior, addr) ; err != nil {
     return fmt.Errorf("error dropping BP@0x%x: %v", addr, err)
   }
-  if err := bpinfo.cb(inferior, be.bp[addr].bp) ; err != nil {
+  if err := bpinfo.cb(inferior, bpinfo.bp) ; err != nil {
     return fmt.Errorf("callback error: %v", err)
   }
   return nil
