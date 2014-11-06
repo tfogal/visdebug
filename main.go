@@ -544,7 +544,7 @@ type allocation struct {
 func (a allocation) begin() uintptr { return a.base }
 func (a allocation) end() uintptr { return a.base+uintptr(a.lpage) }
 func (a allocation) String() string {
-  return fmt.Sprintf("alloc(%d[%d]) -> 0x%08x", a.length, a.lpage, a.base)
+  return fmt.Sprintf("alloc(%d[%d]) : 0x%08x", a.length, a.lpage, a.base)
 }
 
 // an inferior event is some 'asynchronous' action that happens in the inferior.
