@@ -31,7 +31,9 @@ func Break(inferior *ptrace.Tracee, address uintptr) (Breakpoint, error) {
     return Breakpoint{}, fmt.Errorf("reading 0x%0x: %v", address, err)
   }
 
-  // experimental test.  does this happen in practice?
+  // make sure we don't double-enable a BP.  That makes little sense.  Plus,
+  // then we would need to unwrap/Unbreak them in the same order, which would
+  // be hard to guarantee.  Better to just call it an error.
   if (bp.insn & (^uint64(imask))) ==  0xcc {
     return Breakpoint{}, errors.New("there is already a BP there!")
   }
@@ -49,6 +51,9 @@ func Break(inferior *ptrace.Tracee, address uintptr) (Breakpoint, error) {
 
 // Removes the given breakpoint.
 func Unbreak(inferior *ptrace.Tracee, bp Breakpoint) error {
+  if bp.Address == 0x0 {
+    return errors.New("invalid 0x0 address!")
+  }
   // restore the correct instruction ...
   insn, err := inferior.ReadWord(bp.Address)
   if err != nil { return err }
