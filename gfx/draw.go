@@ -166,8 +166,8 @@ func (s s2d) Post() {
 
 func (s s2d) Render(data []float32, dims []uint, maximum float32) {
   if len(dims) != 2 {
-    gfx.Error("%d dimensional data cannot be handled by this 2d code",
-              len(dims))
+    gfx.Error("%d dimensional (%v) data cannot be handled by this 2d code",
+              len(dims), dims)
     return
   }
   if dims[0]*dims[1] == 0 {
