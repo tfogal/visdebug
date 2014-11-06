@@ -120,9 +120,9 @@ func (v *visualmem2D) mallocret(inferior *ptrace.Tracee,
     return nil
   }
 
-  var stack x86_64
+  var stk x86_64
   // when we get to the caller, read the malloc call's retval
-  fld.alloc.base = uintptr(stack.RetVal(inferior))
+  fld.alloc.base = uintptr(stk.RetVal(inferior))
 
   v2d.Trace("malloc(%d) -> 0x%x", fld.alloc.length, fld.alloc.base)
   assert(fld.alloc.base & 0xfff == 0x0) // memory is page-aligned.
@@ -130,7 +130,6 @@ func (v *visualmem2D) mallocret(inferior *ptrace.Tracee,
   // We hacked the argument to 'upgrade' it to a page size.  It's probably a
   // dead value, but update it just to be certain we don't make any
   // inferior-visible changes.
-  var stk x86_64
   if err := stk.SetArg1(inferior, uint64(fld.alloc.length)) ; err != nil {
     return err
   }
@@ -285,13 +284,6 @@ func (v *visualmem2D) header(inferior *ptrace.Tracee,
   }
   assert(bb.LoopHeader()) // if this isn't a loop header, wtf?
 
-  for _, hdr := range bb.Headers {
-    v2d.Trace("inserting header BP @ 0x%x", hdr.Addr)
-    if v.AddBP(inferior, hdr.Addr, v.header) ; err != nil {
-      return fmt.Errorf("BP at loop header (0x%x): %v", hdr.Addr, err)
-    }
-  }
-
   assert(whereis(inferior) == bb.Addr)
   // we'd like to insert our BP first.  But that could muck up symexec and
   // execution in general!  so first lets do our actual work: one iteration's
@@ -330,6 +322,16 @@ func (v *visualmem2D) header(inferior *ptrace.Tracee,
     }
     v.fields[j] = fld
   }
+
+  // loop for any loop headers and set breakpoints there that will in turn call
+  // us again: this is how we loop through the headers.
+  for _, hdr := range bb.Headers {
+    v2d.Trace("inserting header BP @ 0x%x", hdr.Addr)
+    if v.AddBP(inferior, hdr.Addr, v.header) ; err != nil {
+      return fmt.Errorf("BP at loop header (0x%x): %v", hdr.Addr, err)
+    }
+  }
+
   return nil
 }
 
