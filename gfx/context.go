@@ -54,7 +54,7 @@ func Context() error {
     sdl.GL_SetAttribute(C.SDL_GL_CONTEXT_PROFILE_MASK,
                         C.SDL_GL_CONTEXT_PROFILE_CORE)
     sdl.GL_SetAttribute(C.SDL_GL_CONTEXT_MAJOR_VERSION, 3)
-    sdl.GL_SetAttribute(C.SDL_GL_CONTEXT_MINOR_VERSION, 2)
+    sdl.GL_SetAttribute(C.SDL_GL_CONTEXT_MINOR_VERSION, 1)
     sdl.GL_SetAttribute(sdl.GL_CONTEXT_DEBUG_FLAG, 1)
     sdl.GL_SetAttribute(sdl.GL_CONTEXT_FLAGS , sdl.GL_CONTEXT_DEBUG_FLAG)
     window = sdl.CreateWindow("vismem", sdl.WINDOWPOS_UNDEFINED,
