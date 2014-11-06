@@ -750,7 +750,7 @@ func user_symbol(name string) bool {
     return false
   }
   syms := []string{
-    "calloc", "envz_strip", "fgets", "free", "getpagesize", "mmap", "memset",
+    "envz_strip", "fgets", "free", "getpagesize", "mmap", "memset",
     "mprotect", "posix_memalign", "_IO_fgets",
   }
 
