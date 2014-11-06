@@ -59,7 +59,7 @@ func (v *visualmem2D) malloc(inferior *ptrace.Tracee,
   // figure out where the caller is, plus set a BP there.
   retaddr := stk.RetAddr(inferior)
   if err := v.AddBP(inferior, retaddr, v.mallocret) ; err != nil {
-    return err
+    return fmt.Errorf("cannot add mallocret bp@0x%x: %v", retaddr, err)
   }
 
   // does that caller make sense?  we don't care if glibc allocs memory.
@@ -110,15 +110,13 @@ func (v *visualmem2D) mallocret(inferior *ptrace.Tracee,
                                 bp debug.Breakpoint) error {
   // re-insert our BP for malloc.
   if err := v.AddBP(inferior, v.maddr, v.malloc) ; err != nil {
-    return err
+    return fmt.Errorf("adding malloc bp@0x%x: %v", v.maddr, err)
   }
 
   // we didn't know the address yet, so we put it at 0x0.
   fld := v.fields[0x0]
   delete(v.fields, 0x0) // we'll re-add with a better addr, if appropriate.
   if stnull == fld.state { // then we didn't create a state for this.  ignore.
-    var stk x86_64
-    v2d.Trace("ignoring allocated 0x%x address", uintptr(stk.RetVal(inferior)))
     return nil
   }
 
@@ -189,7 +187,7 @@ func (v *visualmem2D) access(inferior *ptrace.Tracee, pages allocation) error {
   // from a call!).. but experience and testing shows that the stack is almost
   // always setup such that we are in a prologue/epilogue...
   raddr := stk.RetAddrTop(inferior)
-  v2d.Trace("want to add BP @ 0x%x", raddr)
+  v2d.Trace("want to add re-enable protection @ 0x%x", raddr)
   if err := v.AddBP(inferior, raddr, v.accessret) ; err != nil {
     // okay... try again assuming we are not in a prologue/epilogue.
     raddr = stk.RetAddrMid(inferior)
@@ -273,8 +271,6 @@ func (v *visualmem2D) header(inferior *ptrace.Tracee,
   }
   // we had to come through 'access' to get here, and that would not have led
   // us here unless the current symbol was a user_symbol.
-  fmt.Printf("%s is a user symbol: %v\n", symbol.Name(),
-             user_symbol(symbol.Name()))
   assert(user_symbol(symbol.Name()))
   graph := cfg.FromAddress(globals.program, symbol.Address())
   if graph == nil {
@@ -297,8 +293,11 @@ func (v *visualmem2D) header(inferior *ptrace.Tracee,
   }
 
   assert(whereis(inferior) == bb.Addr)
-  // okay, now we need to do one iteration of identifying our bounds.  the BP
-  // we just set for our header[s] should cover the subsequent iteration.
+  // we'd like to insert our BP first.  But that could muck up symexec and
+  // execution in general!  so first lets do our actual work: one iteration's
+  // worth of identifying loop bounds.  we only do one iteration; when we're
+  // done, we'll set a BP so that we'll get called again if there are further
+  // iterations.
   insn_regs, err := symexec(inferior, bb.Addr)
   if err != nil {
     return err
@@ -355,6 +354,8 @@ func (v *visualmem2D) vis(inferior *ptrace.Tracee, addr uintptr) error {
     bslice := castf32b(fld.data)
     assert(fld.data != nil)
     if err := inferior.Read(fld.alloc.base, bslice) ; err != nil {
+      wo := addr_where(inferior.PID(), fld.alloc.base)
+      fmt.Printf("%v is in '%s'\n", fld.alloc, wo)
       return fmt.Errorf("read failed: %v", err)
     }
     mx := maxf(fld.data)
@@ -370,12 +371,12 @@ func (v *visualmem2D) vis(inferior *ptrace.Tracee, addr uintptr) error {
 // visualization, which is, ya know, our whole purpose here and all.
 func (v *visualmem2D) accessret(inferior *ptrace.Tracee,
                                 bp debug.Breakpoint) error {
-  v2d.Trace("Re-enabling protection for something.")
   if v.todeny == nil {
     v2d.Warning("Nothing to re-enable.  This means that the current function" +
                 " free()d all memory that it accessed.  Unlikely but possible.")
     return nil
   }
+  v2d.Trace("Re-enabling protection for %d allocs.", len(v.todeny))
 
   for _, alc := range v.todeny {
     _, err := v.pages(alc.base)
@@ -467,12 +468,12 @@ func (v *visualmem2D) Setup(inferior *ptrace.Tracee) error {
 
   // malloc will tell us what allocations we will care about.
   if err := v.AddBP(inferior, v.maddr, v.malloc) ; err != nil {
-    return err
+    return fmt.Errorf("could not add initial 'malloc' bp: %v", err)
   }
 
   // free means we can/should stop watching that memory.
   if err := v.AddBP(inferior, v.faddr, v.free) ; err != nil {
-    return err
+    return fmt.Errorf("could not add initial 'free' bp: %v", err)
   }
 
   return nil
