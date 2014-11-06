@@ -779,9 +779,8 @@ func bounds(program string, inferior *ptrace.Tracee) ([]uint, error) {
     cfg.Analyze(rn)
   }
   bb, err := basic_block(graph, whereis(inferior))
-  if err != nil {
-    log.Fatalf("It is pitch dark.  We have been eaten by a grue: %v",
-               err)
+  if err != nil { // Don't know where we are, then.
+    log.Fatalf("It is pitch dark.  We have been eaten by a grue: %v", err)
   }
   return bind_identify(symbol.Name(), bb, inferior)
 }

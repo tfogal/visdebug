@@ -6,6 +6,7 @@ package main
 import(
   "fmt"
   "unsafe"
+  "./cfg"
   "./debug"
   "./gfx"
   "./msg"
@@ -13,48 +14,76 @@ import(
   "github.com/tfogal/ptrace"
 )
 
+var v2d = msg.StdChan()
+
+type fieldstate uint
+const(
+  stnull = fieldstate(0)
+  stmalloc = iota
+  stmallocret
+  stfree
+  stallow
+  sthdr
+  stdeny
+)
+
 type field2 struct {
   gsfield gfx.Scalar2D
   data []float32
-  dims [2]uint
+  dims []uint
   alloc allocation
-  ignore bool
+  state fieldstate
 }
 
 type visualmem2D struct {
   BaseEvent
-  fields map[uintptr]field2
   tjfmalloc uintptr // address of 'tjfmalloc' function.
-  maddr uintptr // address of 'malloc' function.
-  faddr uintptr // address of 'free' function.
-  // for the most recent allocation. always points at fields[x].alloc
-  // for some x.
-  lastcess *allocation
+  maddr uintptr     // address of 'malloc' function.
+  faddr uintptr     // address of 'free' function.
+  fields map[uintptr]field2
+  // a slice of pointers at field[x].allocs that we need to re-enable when this
+  // function exits.
+  todeny map[uintptr]*allocation
 }
 
-var v2d = msg.StdChan()
-
-/*
-func (v visualmem2D) String() string {
-  return fmt.Sprintf("visual mem: %v %v", v.alloc, v.dims)
+func (v *visualmem2D) destroy(fldaddr uintptr) {
+  // first, make sure there's nothing to for that field.
+  delete(v.todeny, v.fields[fldaddr].alloc.base)
+  delete(v.fields, fldaddr)
 }
-*/
 
 // called when a 'malloc' breakpoint is hit.
 func (v *visualmem2D) malloc(inferior *ptrace.Tracee,
                              bp debug.Breakpoint) error {
-  // record the length.
   var stk x86_64
-  fld := field2{alloc: allocation{length: uint(stk.Arg1(inferior))}}
-  fld.ignore = false
+  // figure out where the caller is, plus set a BP there.
+  retaddr := stk.RetAddr(inferior)
+  if err := v.AddBP(inferior, retaddr, v.mallocret) ; err != nil {
+    return err
+  }
+
+  // does that caller make sense?  we don't care if glibc allocs memory.
+  symbol, err := find_function(retaddr)
+  if err != nil {
+    return fmt.Errorf("can't find fqn from 0x%x: %v", retaddr, err)
+  }
+  if !user_symbol(symbol.Name()) {
+    v2d.Trace("Allocating memory in %s?  We don't care.", symbol.Name())
+    return nil
+  }
+  v2d.Trace("bp when we return in %s", symbol.Name())
+
+  // record the length.
+  fld := field2{alloc: allocation{length: uint(stk.Arg1(inferior))},
+                state: stmalloc}
   if fld.alloc.length < globals.minsize {
-    fld.ignore = true
+    return nil
   }
   fld.alloc.lpage = uint64(fld.alloc.length)
 
   // "upgrade" the size of the allocation so that it always ends on a
   // page boundary.
-  if !fld.ignore && ((4096-1) & fld.alloc.length) != 0 {
+  if ((4096-1) & fld.alloc.length) != 0 {
     fld.alloc.lpage = uint64(int64(fld.alloc.length + 4096) & ^(4096-1))
     inject.Trace("upgrading %d-byte allocation to %d bytes\n",
                  uint(stk.Arg1(inferior)), fld.alloc.lpage)
@@ -66,43 +95,36 @@ func (v *visualmem2D) malloc(inferior *ptrace.Tracee,
   // we don't know the base address yet.  make one up.
   v.fields[0x0] = fld
 
-  // figure out where the caller is and set a BP there.
-  retaddr := stk.RetAddr(inferior)
-
-  if err := v.AddBP(inferior, retaddr, v.mallocret) ; err != nil {
+  // and finally jump to our special malloc instead of the standard one.
+  if err := inferior.SetIPtr(v.tjfmalloc) ; err != nil {
     return err
   }
 
-  // and finally jump to our special malloc instead of the standard one.
-  if !fld.ignore {
-    if err := inferior.SetIPtr(v.tjfmalloc) ; err != nil {
-      return err
-    }
-  }
   return nil
 }
 
 func (v *visualmem2D) mallocret(inferior *ptrace.Tracee,
                                 bp debug.Breakpoint) error {
-  // when we get to the caller, read the malloc call's retval
-  var stack x86_64
-  //fld := &v.fields[len(v.fields)-1]
-  fld := v.fields[0x0]
-  fld.alloc.base = uintptr(stack.RetVal(inferior))
-  delete(v.fields, 0x0) // drop it.  we'll re-add w/ correct addr at end.
-
-  v2d.Trace("malloc(%d) -> 0x%0x\n", fld.alloc.length, fld.alloc.base)
-/*
-  if fld.ignore {
-    v2d.Trace("Field told us it doesn't matter.  Dropping it...")
-    v.fields = v.fields[0:len(v.fields)-1]
-  }
-*/
-
-  // and re-insert our BP for malloc.
+  // re-insert our BP for malloc.
   if err := v.AddBP(inferior, v.maddr, v.malloc) ; err != nil {
     return err
   }
+
+  // we didn't know the address yet, so we put it at 0x0.
+  fld := v.fields[0x0]
+  delete(v.fields, 0x0) // we'll re-add with a better addr, if appropriate.
+  if stnull == fld.state { // then we didn't create a state for this.  ignore.
+    var stk x86_64
+    v2d.Trace("ignoring allocated 0x%x address", uintptr(stk.RetVal(inferior)))
+    return nil
+  }
+
+  var stack x86_64
+  // when we get to the caller, read the malloc call's retval
+  fld.alloc.base = uintptr(stack.RetVal(inferior))
+
+  v2d.Trace("malloc(%d) -> 0x%x", fld.alloc.length, fld.alloc.base)
+  assert(fld.alloc.base & 0xfff == 0x0) // memory is page-aligned.
 
   // We hacked the argument to 'upgrade' it to a page size.  It's probably a
   // dead value, but update it just to be certain we don't make any
@@ -112,32 +134,42 @@ func (v *visualmem2D) mallocret(inferior *ptrace.Tracee,
     return err
   }
 
-  if !fld.ignore {
-    // add a watch for that memory.  This will protect it, even though
-    // it's already protected due to how our allocation works, but that
-    // shouldn't hurt.
-    if err := v.AddWatch(inferior, fld.alloc, v.access) ; err != nil {
-      return err
-    }
-    v2d.Trace("added watch for %v", fld.alloc)
-
-    // allocate stuff we'll use for vis.
-    fld.gsfield = gfx.ScalarField2D()
-    if err := fld.gsfield.Pre() ; err != nil {
-      return err
-    }
-    var f32 float32
-    fld.data = make([]float32, fld.alloc.length / uint(unsafe.Sizeof(f32)))
-    v.fields[fld.alloc.base] = fld
+  // add a watch for that memory.  This will protect it, even though
+  // it's already protected due to how our allocation works, but that
+  // shouldn't hurt.
+  if err := v.AddWatch(inferior, fld.alloc, v.access) ; err != nil {
+    return err
   }
-  
+  v2d.Trace("added watch for %v", fld.alloc)
+  delete(v.todeny, fld.alloc.base)
+
+  // allocate stuff we'll use for vis.
+  fld.gsfield = gfx.ScalarField2D()
+  if err := fld.gsfield.Pre() ; err != nil {
+    return err
+  }
+  var f32 float32
+  fld.data = make([]float32, fld.alloc.length / uint(unsafe.Sizeof(f32)))
+  v.fields[fld.alloc.base] = fld
+
   return nil
+}
+
+// adds an allocation to our list of 'we need to re-enable access detection on
+// this'.
+func (v *visualmem2D) add_blocker(alc *allocation) {
+  if v.todeny == nil {
+    v.todeny = make(map[uintptr]*allocation)
+  }
+
+  assert(v.todeny[alc.base] == nil) // i.e. not there already.
+  v.todeny[alc.base] = alc
 }
 
 // Called when we have segfaulted due to the application program accessing
 // memory we are interested in.
 func (v *visualmem2D) access(inferior *ptrace.Tracee, pages allocation) error {
-  v2d.Trace("inferior accessed %v", pages)
+  v2d.Trace("inferior accessed %v at 0x%x", pages, whereis(inferior))
   // get rid of the segv, so execution will correctly continue when we're done.
   if err := inferior.ClearSignal() ; err != nil {
     return err
@@ -145,43 +177,26 @@ func (v *visualmem2D) access(inferior *ptrace.Tracee, pages allocation) error {
 
   // 'accessret' needs this to know *which* access it is reinstating.
   fld := v.fields[pages.base]
-  v.lastcess = &fld.alloc
+  v.add_blocker(&fld.alloc)
 
-  v2d.Trace("access of 0x%x+%d by 0x%x\n", fld.alloc.base, fld.alloc.length,
-            whereis(inferior))
-
-  // NOTE we need to do the bounds up here, BEFORE we 'AddBP' below!  That's
-  // because 'bounds' can do a bit of execution, and if we hit something we've
-  // set up here then we'll be in bad shape...
-  assert(globals.program != "")
-  dims, err := bounds(globals.program, inferior)
-  if err != nil {
-    // note it, but ignore it.  this happens sometimes, e.g. when accessing
-    // data outside of a loop.
-    v2d.Warning("error getting bounds: %v\n", err)
-  } else {
-    if len(dims) >= 2 {
-      copy(fld.dims[0:2], dims[0:2])
-    }
-    v2d.Trace("bounds: %v\n", dims)
-  }
-
+  // Okay, BPs are set for the loop header.  Now also figure out where we're
+  // returning to, so we can set a BP there && enable access detection again.
   var stk x86_64
   // By my reasoning, we are in the middle of a function (we just came back
   // from a call!).. but experience and testing shows that the stack is almost
-  // always setup so that we are in a prologue/epilogue...
+  // always setup such that we are in a prologue/epilogue...
   raddr := stk.RetAddrTop(inferior)
   v2d.Trace("want to add BP @ 0x%x", raddr)
   if err := v.AddBP(inferior, raddr, v.accessret) ; err != nil {
     // okay... try again assuming we are not in a prologue/epilogue.
     raddr = stk.RetAddrMid(inferior)
-    v2d.Warning("bad return address. will try @ 0x%x", raddr)
+    v2d.Warning("bad return address (%v). will try @ 0x%x", err, raddr)
     if err := v.AddBP(inferior, raddr, v.accessret) ; err != nil {
       // *still* no luck.  Okay, just search for a 'ret' insn, but from the top
       // of the function we are in now, not the current iptr
       symbol, err := where(inferior)
       if err != nil {
-        return err
+        return fmt.Errorf("dunno where are: %v", err)
       }
       v2d.Warning("That failed too; searching for ret in %v", symbol)
       ret, err := find_opcode(x86asm.RET, inferior, symbol.Address())
@@ -195,7 +210,110 @@ func (v *visualmem2D) access(inferior *ptrace.Tracee, pages allocation) error {
       v2d.Trace("(ret insn) set our BP (for DENY) at 0x%x", ret)
     }
   }
+
+  assert(globals.program != "")
+  // There are *three* exit points from this state.
+  //   - the memory is freed
+  //   - we hit a loop header BB that bounds our current BB.
+  //   - we return / leave the function
+  // A BP for 'free' should already be set.  Next we'll set a BP for the loop
+  // header.
+  symbol, err := where(inferior)
+  if err != nil {
+    return err
+  }
+  // If a library function like 'memset' created the access, just ignore it; we
+  // won't get any information out of library functions.
+  if !user_symbol(symbol.Name()) {
+    return nil
+  }
+  graph := cfg.FromAddress(globals.program, symbol.Address())
+  if graph == nil {
+    return fmt.Errorf("could not compute CFG for %v", symbol)
+  }
+  if rn := root_node(graph, symbol) ; rn != nil {
+    cfg.Analyze(rn)
+  }
+  bb, err := basic_block(graph, whereis(inferior))
+  if err != nil {
+    return fmt.Errorf("Beware of grue: %v", err) // don't know where we are?
+  }
+  // Initialize our dims.
+  fld.dims = make([]uint, 0)
+  for _, hdr := range bb.Headers {
+    v2d.Trace("inserting header BP @ 0x%x", hdr.Addr)
+    if v.AddBP(inferior, hdr.Addr, v.header) ; err != nil {
+      return fmt.Errorf("BP at loop header (0x%x): %v", hdr.Addr, err)
+    }
+  }
   v.fields[fld.alloc.base] = fld
+
+  return nil
+}
+
+// Hit a loop header basic block.
+func (v *visualmem2D) header(inferior *ptrace.Tracee,
+                             bp debug.Breakpoint) error {
+  v2d.Trace("header BP (%v) hit", bp)
+
+  // There are a few exit paths from this node.
+  //   - free of the memory we have here
+  //   - the return address of the current function
+  //   - higher round of header info.
+  // 'free' should already be taken care of.  The return address breakpoint
+  // should have been created in 'access', which had to come before this.
+  // So: see if we can find any loop headers for us, and break on that.
+
+  symbol, err := where(inferior)
+  if err != nil {
+    return err
+  }
+  // we had to come through 'access' to get here, and that would not have led
+  // us here unless the current symbol was a user_symbol.
+  fmt.Printf("%s is a user symbol: %v\n", symbol.Name(),
+             user_symbol(symbol.Name()))
+  assert(user_symbol(symbol.Name()))
+  graph := cfg.FromAddress(globals.program, symbol.Address())
+  if graph == nil {
+    return fmt.Errorf("could not compute CFG for %v", symbol)
+  }
+  if rn := root_node(graph, symbol) ; rn != nil {
+    cfg.Analyze(rn)
+  }
+  bb, err := basic_block(graph, whereis(inferior))
+  if err != nil {
+    return fmt.Errorf("Beware of grue: %v", err) // don't know where we are?
+  }
+  assert(bb.LoopHeader()) // if this isn't a loop header, wtf?
+
+  for _, hdr := range bb.Headers {
+    v2d.Trace("inserting header BP @ 0x%x", hdr.Addr)
+    if v.AddBP(inferior, hdr.Addr, v.header) ; err != nil {
+      return fmt.Errorf("BP at loop header (0x%x): %v", hdr.Addr, err)
+    }
+  }
+
+  assert(whereis(inferior) == bb.Addr)
+  // okay, now we need to do one iteration of identifying our bounds.  the BP
+  // we just set for our header[s] should cover the subsequent iteration.
+  return nil
+}
+
+func (v *visualmem2D) vis(inferior *ptrace.Tracee, addr uintptr) error {
+  fld := v.fields[addr]
+  assert(fld.gsfield != nil) // i.e. this is a valid field.
+
+  if fld.dims != nil && len(fld.dims) == 2 && fld.dims[0]*fld.dims[1] > 0 {
+    // 'Read' needs []byte memory, annoyingly.
+    bslice := castf32b(fld.data)
+    assert(fld.data != nil)
+    if err := inferior.Read(fld.alloc.base, bslice) ; err != nil {
+      return fmt.Errorf("read failed: %v", err)
+    }
+    mx := maxf(fld.data)
+    v2d.Trace("calculated max of: %v\n", mx)
+    fld.gsfield.Render(fld.data, fld.dims, mx)
+  }
 
   return nil
 }
@@ -206,41 +324,32 @@ func (v *visualmem2D) access(inferior *ptrace.Tracee, pages allocation) error {
 func (v *visualmem2D) accessret(inferior *ptrace.Tracee,
                                 bp debug.Breakpoint) error {
   v2d.Trace("Re-enabling protection for something.")
-  if v.lastcess == nil {
-    // This means that we tried to have *two* accessrets in the same function.
-    // That definitely means things are broken.  We need to keep a *list* of
-    // protections we want to re-enable, not a single thing.
-    v2d.Warning("Don't know last access.  Broken access detection!")
-    v2d.Warning("It's likely there is some memory that we *were* watching " +
-                "but are no longer; we will miss some updates!")
+  if v.todeny == nil {
+    v2d.Warning("Nothing to re-enable.  This means that the current function" +
+                " free()d all memory that it accessed.  Unlikely but possible.")
     return nil
-  }
-  _, err := v.pages(v.lastcess.base)
-  if err != nil {
-    v2d.Trace("allocation %v was removed, ignoring.", v.lastcess)
-    return nil
-  }
-  v2d.Trace("Adding watch (enabling protection) for %v", *v.lastcess)
-  if err := v.AddWatch(inferior, *v.lastcess, v.access) ; err != nil {
-    return err
   }
 
-  //fld := v.find_field_by_page(*v.lastcess)
-  fld := v.fields[v.lastcess.base]
-  //assert(fld != field2{}) // what inserted the BP that got us here, if so?
-  if len(fld.dims) == 2 && fld.dims[0] > 0 && fld.dims[1] > 0 {
-    // 'Read' needs []byte memory, annoyingly.
-    bslice := castf32b(fld.data)
-    if err := inferior.Read(fld.alloc.base, bslice) ; err != nil {
+  for _, alc := range v.todeny {
+    _, err := v.pages(alc.base)
+    if err != nil {
+      v2d.Trace("allocation %v was removed, ignoring.", *alc)
+      continue
+    }
+
+    if err := v.vis(inferior, alc.base) ; err != nil {
+      return fmt.Errorf("could not vis %v: %v", alc, err)
+    }
+
+    v2d.Trace("Adding watch for %v", *alc)
+    if err := v.AddWatch(inferior, *alc, v.access) ; err != nil {
       return err
     }
-    mx := maxf(fld.data)
-    v2d.Trace("calculated max of: %v\n", mx)
-    fld.gsfield.Render(fld.data, fld.dims[0:2], mx)
   }
 
-  // reset the last access, so we don't accidentally reuse it.
-  v.lastcess = nil
+  // now that we've processed our list, drop it.
+  v.todeny = nil
+
   return nil
 }
 
@@ -257,7 +366,7 @@ func (v *visualmem2D) free(inferior *ptrace.Tracee, bp debug.Breakpoint) error {
   var stk x86_64
   freearg := uintptr(stk.Arg1(inferior)) // what they're freeing
   alc, err := v.pages(freearg) // figure out pages from address
-  v2d.Trace("free(0x%0x) [ours: %v]", freearg, err==nil)
+  v2d.Trace("free(0x%x) [ours: %v]", freearg, err==nil)
   if err != nil {
     // Not necessarily an error.  Could be memory we decided not to instrument.
     v2d.Trace("allocation 0x%x not found; not instrumented?", freearg)
@@ -269,6 +378,7 @@ func (v *visualmem2D) free(inferior *ptrace.Tracee, bp debug.Breakpoint) error {
     return nil
   }
   delete(v.fields, alc.base)
+  delete(v.todeny, alc.base)
 
   // find where free returns to; we'll call ourselves there to reinsert the
   // 'free' BP.
