@@ -119,8 +119,8 @@ func (df dwfLocal) Match(entry *dwarf.Entry) (bool, bool) {
     // if this is a function, but not the one we're looking for, then its whole
     // subtree is junk.  prune it.
     if function(entry) != df.fqn {
-      types.Trace("skipping %s because it's not our target of %s\n",
-                  function(entry), df.fqn)
+      //types.Trace("skipping %s because it's not our target of %s\n",
+      //            function(entry), df.fqn)
       return false, false
     }
   }
