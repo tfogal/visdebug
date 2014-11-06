@@ -46,12 +46,12 @@ type BaseEvent struct {
   // It is silly to create a map of these based on the address, since the
   // address is in the Breakpoint itself.  But we need to be able to remove
   // breakpoints from our list, and you can't shrink a slice.
-  bp map[uintptr]breakelem
+  bp map[uintptr][]breakelem
   sf map[uintptr]sfelem
 }
 
 func (be *BaseEvent) Setup(*ptrace.Tracee) error {
-  be.bp = make(map[uintptr]breakelem)
+  be.bp = make(map[uintptr][]breakelem)
   be.sf = make(map[uintptr]sfelem)
   return nil
 }
@@ -61,30 +61,39 @@ func (be *BaseEvent) printBPs() {
   fmt.Println("bps are now:")
   sm := symbol("malloc", globals.symbols).Address()
   sf := symbol("free", globals.symbols).Address()
-  for k, v := range be.bp {
-    if k == sm {
-      fmt.Printf("bp: malloc: %v\n", v.bp)
-    } else if k == sf {
-      fmt.Printf("bp: free: %v\n", v.bp)
-    } else {
-      fmt.Printf("bp: 0x%x: %v\n", k, v.bp)
+  for ptr, elems := range be.bp {
+    for i, v := range elems {
+      if ptr == sm {
+        fmt.Printf("bp[%d]: malloc: %v\n", i, v.bp)
+      } else if ptr == sf {
+        fmt.Printf("bp[%d]: free: %v\n", i, v.bp)
+      } else {
+        fmt.Printf("bp[%d]: 0x%x: %v\n", i, ptr, v.bp)
+      }
     }
   }
 }
 
 func (be *BaseEvent) AddBP(inferior *ptrace.Tracee, addr uintptr,
                            cb BPcb) error {
+  if be.bp[addr] == nil {
+    be.bp[addr] = make([]breakelem, 0)
+  }
+  assert(cb != nil)
   bp, err := debug.Break(inferior, addr)
   if err != nil {
     return err
   }
-  be.bp[addr] = breakelem{bp: bp, cb: cb}
+  be.bp[addr] = append(be.bp[addr], breakelem{bp: bp, cb: cb})
   return nil
 }
 
 func (be *BaseEvent) DropBP(inferior *ptrace.Tracee, addr uintptr) error {
-  if err := debug.Unbreak(inferior, be.bp[addr].bp) ; err != nil {
-    return fmt.Errorf("unbreak failed: %v", err)
+  assert(len(be.bp[addr]) > 0)
+  for _, belem := range be.bp[addr] {
+    if err := debug.Unbreak(inferior, belem.bp) ; err != nil {
+      return fmt.Errorf("unbreak failed: %v", err)
+    }
   }
   // remove the BP from our list.
   delete(be.bp, addr)
@@ -92,15 +101,20 @@ func (be *BaseEvent) DropBP(inferior *ptrace.Tracee, addr uintptr) error {
 }
 
 func (be *BaseEvent) Trap(inferior *ptrace.Tracee, addr uintptr) error {
-  bpinfo := be.bp[addr]
+  assert(addr != 0x0)
+  belems := be.bp[addr]
+
   // drop the BP.  Execution can't continue otherwise.  If the user wants the
   // breakpoint to be persistent, they need to setup a mechanism by which it
   // will get re-inserted.
   if err := be.DropBP(inferior, addr) ; err != nil {
     return fmt.Errorf("error dropping BP@0x%x: %v", addr, err)
   }
-  if err := bpinfo.cb(inferior, bpinfo.bp) ; err != nil {
-    return fmt.Errorf("callback error: %v", err)
+  for _, be := range belems {
+    assert(be.bp.Address != 0x0)
+    if err := be.cb(inferior, be.bp) ; err != nil {
+      return fmt.Errorf("callback error: %v", err)
+    }
   }
   return nil
 }
@@ -133,6 +147,8 @@ func (be *BaseEvent) Segfault(inferior *ptrace.Tracee, access uintptr) error {
 
 func (be *BaseEvent) AddWatch(inferior *ptrace.Tracee, pages allocation,
                               cb SFcb) error {
+  assert(cb != nil)
+
   iptr, err := inferior.GetIPtr()
   if err != nil {
     return fmt.Errorf("don't know where we are: %v", err)
