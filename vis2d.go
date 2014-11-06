@@ -240,6 +240,7 @@ func (v *visualmem2D) access(inferior *ptrace.Tracee, pages allocation) error {
   }
   // Initialize our dims.
   fld.dims = make([]uint, 0)
+  fld.state = stallow
   for _, hdr := range bb.Headers {
     v2d.Trace("inserting header BP @ 0x%x", hdr.Addr)
     if v.AddBP(inferior, hdr.Addr, v.header) ; err != nil {
@@ -263,7 +264,6 @@ func (v *visualmem2D) header(inferior *ptrace.Tracee,
   // 'free' should already be taken care of.  The return address breakpoint
   // should have been created in 'access', which had to come before this.
   // So: see if we can find any loop headers for us, and break on that.
-
   symbol, err := where(inferior)
   if err != nil {
     return err
@@ -296,6 +296,38 @@ func (v *visualmem2D) header(inferior *ptrace.Tracee,
   assert(whereis(inferior) == bb.Addr)
   // okay, now we need to do one iteration of identifying our bounds.  the BP
   // we just set for our header[s] should cover the subsequent iteration.
+  insn_regs, err := symexec(inferior, bb.Addr)
+  if err != nil {
+    return err
+  }
+  ixn, cmpaddr, err := find_2arg([]x86asm.Op{x86asm.CMP}, inferior, bb.Addr)
+  if err != nil {
+    return fmt.Errorf("cannot find 'cmp' insn in bb@0x%x: %v", bb.Addr, err)
+  }
+  // this is a little sketch, because we shouldn't be letting the inferior
+  // execute in any of these.  but it should just be a few instructions, and
+  // there's little likelihood it will hit a different BB or access blocked mem
+  if err := debug.WaitUntil(inferior, cmpaddr) ; err != nil {
+    return fmt.Errorf("executing in 'header' (sketch!): %v", err)
+  }
+
+  rf := rfaddr(insn_regs, cmpaddr)
+  assert(rf != nil) // we just executed up until the CMP. now it's not there?
+
+  values, err := readargs(ixn, rf, symbol.Name(), inferior)
+  if err != nil {
+    return err
+  }
+  larger := maxvalue(values)
+  for j, fld := range v.fields {
+    if fld.state == stallow {
+      fld.state = sthdr
+    }
+    if fld.state == sthdr {
+      fld.dims = append(fld.dims, uint(larger))
+    }
+    v.fields[j] = fld
+  }
   return nil
 }
 
@@ -303,6 +335,18 @@ func (v *visualmem2D) vis(inferior *ptrace.Tracee, addr uintptr) error {
   fld := v.fields[addr]
   assert(fld.gsfield != nil) // i.e. this is a valid field.
 
+  if fld.dims == nil {
+    v2d.Warning("dims is nil, ignoring")
+    return nil
+  }
+  if len(fld.dims) != 2 {
+    v2d.Warning("dims array length is not 2 (%d), ignoring", len(fld.dims))
+    return nil
+  }
+  if fld.dims[0]*fld.dims[1] <= 0 {
+    v2d.Warning("dims not positive (%dx%d)", fld.dims[0], fld.dims[1])
+    return nil
+  }
   if fld.dims != nil && len(fld.dims) == 2 && fld.dims[0]*fld.dims[1] > 0 {
     // 'Read' needs []byte memory, annoyingly.
     bslice := castf32b(fld.data)
@@ -364,6 +408,14 @@ func (v *visualmem2D) pages(addr uintptr) (allocation, error) {
 
 func (v *visualmem2D) free(inferior *ptrace.Tracee, bp debug.Breakpoint) error {
   var stk x86_64
+
+  // we don't care about free's return value, but we need to reinsert the BP
+  // *somewhere*.
+  raddr := uintptr(stk.RetAddrTop(inferior))
+  if err := v.AddBP(inferior, raddr, v.freeret) ; err != nil {
+    return fmt.Errorf("error inserting freeret bp@0x%x: %v", raddr, err)
+  }
+
   freearg := uintptr(stk.Arg1(inferior)) // what they're freeing
   alc, err := v.pages(freearg) // figure out pages from address
   v2d.Trace("free(0x%x) [ours: %v]", freearg, err==nil)
@@ -375,17 +427,10 @@ func (v *visualmem2D) free(inferior *ptrace.Tracee, bp debug.Breakpoint) error {
   assert(alc.base == freearg)
   if err := v.DropWatch(inferior, alc) ; err != nil {
     v2d.Warning("We weren't watching %v... (%v)\n", alc, err)
-    return nil
+    return err
   }
-  delete(v.fields, alc.base)
-  delete(v.todeny, alc.base)
+  v.destroy(alc.base)
 
-  // find where free returns to; we'll call ourselves there to reinsert the
-  // 'free' BP.
-  raddr := uintptr(stk.RetAddrTop(inferior))
-  if err := v.AddBP(inferior, raddr, v.freeret) ; err != nil {
-    return fmt.Errorf("error inserting freeret bp@0x%x: %v", raddr, err)
-  }
   return nil
 }
 
