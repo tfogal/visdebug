@@ -9,9 +9,9 @@ import "github.com/veandco/go-sdl2/sdl"
 
 const tex2dname = "texScalar2D"
 const vertshader = `
-#version 150
-in vec2 position;
-out vec2 tcoord;
+#version 300 es
+in highp vec2 position;
+out mediump vec2 tcoord;
 
 void main() {
   gl_Position = vec4(position, 0.0, 1.0);
@@ -19,15 +19,15 @@ void main() {
 }
 `
 const fragshader = `
-#version 150
-out vec4 fragColor;
-in vec2 tcoord;
+#version 300 es
+out highp vec4 fragColor;
+in mediump vec2 tcoord;
 uniform sampler2D texScalar2D; // must match 'tex2dname', above!
-uniform float fieldmax;
+uniform highp float fieldmax;
 
 void main() {
-  vec2 tc = (tcoord.xy + vec2(0.9, 0.9)) / vec2(1.8, 1.8);
-  float value = texture(texScalar2D, tc).x / fieldmax;
+  highp vec2 tc = (tcoord.xy + vec2(0.9, 0.9)) / vec2(1.8, 1.8);
+  highp float value = texture(texScalar2D, tc).x / fieldmax;
   value = clamp(value, 0.0, 1.0);
   fragColor = vec4(value, 0.0, 1.0-value, 1.0);
 }
