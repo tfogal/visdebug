@@ -609,12 +609,14 @@ func readmem(memref x86asm.Mem, inferior *ptrace.Tracee) (uint64, error) {
   if err != nil {
     return 0, fmt.Errorf("could not read regs: %v", err)
   }
-  var mr uintptr
+  var mr int64
   switch memref.Base {
-  case x86asm.RIP: mr = uintptr(regs.Rip);
-  case x86asm.RBP: mr = uintptr(regs.Rbp);
+  case x86asm.RIP: mr = int64(regs.Rip);
+  case x86asm.RBP: mr = int64(regs.Rbp);
+  default: assert("unhandled case" == "false")
   }
-  mr = uintptr(int64(mr) + int64(int32(memref.Disp)))
+  // clip to 32bit first, to make sure it gets proper sign extension.
+  mr = mr + int64(int32(memref.Disp))
 /*
   fmt.Printf("memref: seg: %v, base: %v, scale: %v, index: %v, disp: %d\n",
              memref.Segment, memref.Base, memref.Scale, memref.Index,
@@ -622,10 +624,11 @@ func readmem(memref x86asm.Mem, inferior *ptrace.Tracee) (uint64, error) {
   fmt.Printf("0x%0x + %v == 0x%0x\n", regval, int64(int32(memref.Disp)), mr)
 */
 
-  val, err := inferior.ReadWord(mr)
+  val, err := inferior.ReadWord(uintptr(mr))
   if err != nil {
     return 0, fmt.Errorf("reading value @ 0x%0x: %v", mr, err)
   }
+  assert(int64(val) == int64(int32(val)))
   return val, nil
 }
 
