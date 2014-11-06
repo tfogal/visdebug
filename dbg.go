@@ -8,6 +8,7 @@ import "fmt"
 import "io"
 import "log"
 import "os"
+import "sort"
 import "syscall"
 import "./bfd"
 import "./cfg"
@@ -213,4 +214,53 @@ func viewmaps(pid int) {
   for scanner.Scan() {
     fmt.Println(scanner.Text())
   }
+}
+
+type mapaddr struct {
+  low uintptr
+  high uintptr
+  name string
+}
+func getmaps(pid int) []mapaddr {
+  filename := fmt.Sprintf("/proc/%d/maps", pid)
+  maps, err := os.Open(filename)
+  if err != nil {
+    panic(err)
+  }
+  defer maps.Close()
+
+  addrs := make([]mapaddr, 0)
+  scanner := bufio.NewScanner(maps)
+  var l, h uintptr
+  var name string
+  for scanner.Scan() {
+    var junk string
+    line := scanner.Text()
+    _, err := fmt.Sscanf(line, "%x-%x %s %s %s %s %s", &l, &h, &junk, &junk,
+                         &junk, &junk, &name)
+    if err == io.EOF {
+      return addrs
+    }
+    if err != nil {
+      panic(err)
+    }
+    addrs = append(addrs, mapaddr{low: l, high: h})
+  }
+  return addrs
+}
+
+type MapList []mapaddr
+func (m MapList) Len() int { return len(m); }
+func (m MapList) Less(i int, j int) bool { return m[i].low < m[j].low }
+func (m MapList) Swap(i int, j int) { m[i], m[j] = m[j], m[i] }
+
+func addr_where(pid int, addr uintptr) string {
+  alist := getmaps(pid)
+  sort.Sort(MapList(alist))
+  for _, ma := range alist {
+    if ma.low <= addr && addr <= ma.high {
+      return ma.name
+    }
+  }
+  return "unknown..."
 }
