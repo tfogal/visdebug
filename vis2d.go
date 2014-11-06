@@ -63,15 +63,18 @@ func (v *visualmem2D) malloc(inferior *ptrace.Tracee,
   }
 
   // does that caller make sense?  we don't care if glibc allocs memory.
-  symbol, err := find_function(retaddr)
-  if err != nil {
-    return fmt.Errorf("can't find fqn from 0x%x: %v", retaddr, err)
+  {
+    symbol, err := find_function(retaddr)
+    if err != nil {
+      v2d.Warning("can't find fqn from 0x%x: %v", retaddr, err)
+    } else {
+      if !user_symbol(symbol.Name()) {
+        v2d.Trace("Allocating memory in %s?  We don't care.", symbol.Name())
+        return nil
+      }
+      v2d.Trace("bp when we return from %s", symbol.Name())
+    }
   }
-  if !user_symbol(symbol.Name()) {
-    v2d.Trace("Allocating memory in %s?  We don't care.", symbol.Name())
-    return nil
-  }
-  v2d.Trace("bp when we return in %s", symbol.Name())
 
   // record the length.
   fld := field2{alloc: allocation{length: uint(stk.Arg1(inferior))},
