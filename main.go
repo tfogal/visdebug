@@ -749,9 +749,15 @@ func user_symbol(name string) bool {
   if strings.HasPrefix(name, "H5") { // i.e. HDF5 symbols.
     return false
   }
+  if strings.HasPrefix(name, "Py_") { // i.e. python symbols
+    return false
+  }
+  if strings.HasPrefix(name, "_IO_") { // internal glibc IO symbols
+    return false
+  }
   syms := []string{
     "envz_strip", "fgets", "free", "getpagesize", "mmap", "memset",
-    "mprotect", "posix_memalign", "_IO_fgets",
+    "mprotect", "posix_memalign",
   }
 
   for _, s := range syms {
