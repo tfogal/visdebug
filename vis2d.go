@@ -192,14 +192,15 @@ func (v *visualmem2D) access(inferior *ptrace.Tracee, pages allocation) error {
     // okay... try again assuming we are not in a prologue/epilogue.
     raddr = stk.RetAddrMid(inferior)
     v2d.Warning("bad return address (%v). will try @ 0x%x", err, raddr)
-    if err := v.AddBP(inferior, raddr, v.accessret) ; err != nil {
+    err := v.AddBP(inferior, raddr, v.accessret)
+    if err != nil && err != debug.ErrAlreadyBroken {
       // *still* no luck.  Okay, just search for a 'ret' insn, but from the top
       // of the function we are in now, not the current iptr
+      v2d.Warning("That failed too (%v); searching for ret instead.", err)
       symbol, err := where(inferior)
       if err != nil {
         return fmt.Errorf("dunno where are: %v", err)
       }
-      v2d.Warning("That failed too; searching for ret in %v", symbol)
       ret, err := find_opcode(x86asm.RET, inferior, symbol.Address())
       if err != nil {
         return fmt.Errorf("did not find RET in %v: %v", symbol, err)
