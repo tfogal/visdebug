@@ -187,7 +187,8 @@ func (v *visualmem2D) access(inferior *ptrace.Tracee, pages allocation) error {
   // always setup such that we are in a prologue/epilogue...
   raddr := stk.RetAddrTop(inferior)
   v2d.Trace("want to add re-enable protection @ 0x%x", raddr)
-  if err := v.AddBP(inferior, raddr, v.accessret) ; err != nil {
+  err := v.AddBP(inferior, raddr, v.accessret)
+  if err != nil && err != debug.ErrAlreadyBroken {
     // okay... try again assuming we are not in a prologue/epilogue.
     raddr = stk.RetAddrMid(inferior)
     v2d.Warning("bad return address (%v). will try @ 0x%x", err, raddr)

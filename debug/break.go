@@ -35,7 +35,7 @@ func Break(inferior *ptrace.Tracee, address uintptr) (Breakpoint, error) {
   // then we would need to unwrap/Unbreak them in the same order, which would
   // be hard to guarantee.  Better to just call it an error.
   if (bp.insn & (^uint64(imask))) ==  0xcc {
-    return Breakpoint{}, errors.New("there is already a BP there!")
+    return Breakpoint{}, ErrAlreadyBroken
   }
 
   bpinsn := (bp.insn & imask) | 0xcc // 0xcc is "the" breakpoint opcode.
@@ -83,6 +83,7 @@ func Stepback(inferior *ptrace.Tracee) error {
 
 var(
   ErrSegFault = errors.New("SIGSEGV")
+  ErrAlreadyBroken = errors.New("Breakpoint is already there")
 )
 
 func WaitUntil(inferior *ptrace.Tracee, address uintptr) error {
