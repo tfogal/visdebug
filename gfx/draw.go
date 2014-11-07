@@ -177,7 +177,11 @@ func (s s2d) Render(data []float32, dims []uint, maximum float32) {
     const format = gl.LUMINANCE
     const typ = gl.FLOAT
     const intformat = gl.R32F
-    flush_errors("about to set texture data...")
+    flush_errors("validating state on entry")
+    if dims[0] > 8192 || dims[1] > 8192 {
+      gfx.Warning("%dx%d data is too large; skipping it.", dims[0], dims[1])
+      return nil
+    }
     gl.TexImage2D(gl.TEXTURE_2D, 0, intformat, int(dims[0]),int(dims[1]), 0,
                   format, typ, data)
     flush_errors("set texture")
