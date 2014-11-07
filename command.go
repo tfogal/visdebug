@@ -648,6 +648,7 @@ func readreg(regref x86asm.Reg, inferior *ptrace.Tracee) (uint64, error) {
   var v uint64
   switch regref {
   case x86asm.RAX: v = regs.Rax
+  case x86asm.EAX: v = regs.Rax & 0xffffffff
   case x86asm.RCX: v = regs.Rcx
   case x86asm.RDX: v = regs.Rdx
   case x86asm.RBX: v = regs.Rbx
@@ -657,7 +658,9 @@ func readreg(regref x86asm.Reg, inferior *ptrace.Tracee) (uint64, error) {
   case x86asm.RDI: v = regs.Rdi
   case x86asm.R8: v = regs.R8
   case x86asm.R9: v = regs.R9
-  default: panic("unhandled case")
+  default:
+    fmt.Printf("register: %v\n", regref)
+    panic("unhandled case")
   }
 
   return v, nil
