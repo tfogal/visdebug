@@ -628,8 +628,17 @@ func readmem(memref x86asm.Mem, inferior *ptrace.Tracee) (uint64, error) {
   if err != nil {
     return 0, fmt.Errorf("reading value @ 0x%0x: %v", mr, err)
   }
-  assert(int64(val) == int64(int32(val)))
-  return val, nil
+  // We only use readmem to read index variables right now.  Most new code uses
+  // 8-byte indices (i.e. a size_t on x86-64), but some really old code uses
+  // plain 'int', 4 bytes on our target arch.
+  // No sim actually *needs* 8-byte indices (remember this is in a *single*
+  // dimension), so that means the high bits are almost 0.
+  // ... but for really old code, the index is 4-bytes, and if "the next stuff"
+  // in memory is non-zero at the time we read, then we'll grab that stuff.
+  if int64(val) != int64(int32(val)) {
+    typeinfo.Warning("4-byte index variable?  Might just be old code.\n")
+  }
+  return uint64(int64(int32(val))), nil
 }
 
 func readreg(regref x86asm.Reg, inferior *ptrace.Tracee) (uint64, error) {
