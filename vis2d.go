@@ -6,6 +6,7 @@ package main
 import(
   "fmt"
   "unsafe"
+  "./bfd"
   "./cfg"
   "./debug"
   "./gfx"
@@ -44,6 +45,22 @@ type visualmem2D struct {
   // a slice of pointers at field[x].allocs that we need to re-enable when this
   // function exits.
   todeny map[uintptr]*allocation
+}
+
+var graphs map[uintptr]map[uintptr]*cfg.Node
+func init() {
+  graphs = make(map[uintptr]map[uintptr]*cfg.Node)
+}
+func memocfg(addr *bfd.Symbol) map[uintptr]*cfg.Node {
+  if graphs[addr.Address()] == nil {
+    g := cfg.FromAddress(globals.program, addr.Address())
+    assert(g != nil)
+    rn := root_node(g, addr)
+    assert(rn != nil)
+    cfg.Analyze(rn)
+    graphs[addr.Address()] = g
+  }
+  return graphs[addr.Address()]
 }
 
 func (v *visualmem2D) destroy(fldaddr uintptr) {
@@ -229,13 +246,8 @@ func (v *visualmem2D) access(inferior *ptrace.Tracee, pages allocation) error {
   if !user_symbol(symbol.Name()) {
     return nil
   }
-  graph := cfg.FromAddress(globals.program, symbol.Address())
-  if graph == nil {
-    return fmt.Errorf("could not compute CFG for %v", symbol)
-  }
-  if rn := root_node(graph, symbol) ; rn != nil {
-    cfg.Analyze(rn)
-  }
+  v2d.Warning("building '%v' CFG", symbol)
+  graph := memocfg(symbol)
   bb, err := basic_block(graph, whereis(inferior))
   if err != nil {
     return fmt.Errorf("Beware of grue: %v", err) // don't know where we are?
@@ -273,13 +285,7 @@ func (v *visualmem2D) header(inferior *ptrace.Tracee,
   // we had to come through 'access' to get here, and that would not have led
   // us here unless the current symbol was a user_symbol.
   assert(user_symbol(symbol.Name()))
-  graph := cfg.FromAddress(globals.program, symbol.Address())
-  if graph == nil {
-    return fmt.Errorf("could not compute CFG for %v", symbol)
-  }
-  if rn := root_node(graph, symbol) ; rn != nil {
-    cfg.Analyze(rn)
-  }
+  graph := memocfg(symbol)
   bb, err := basic_block(graph, whereis(inferior))
   if err != nil {
     return fmt.Errorf("Beware of grue: %v", err) // don't know where we are?
