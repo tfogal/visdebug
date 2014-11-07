@@ -325,6 +325,7 @@ func (v *visualmem2D) header(inferior *ptrace.Tracee,
     if fld.state == stallow {
       fld.state = sthdr
     }
+    v2d.Trace("appending %d to %v", uint(larger), fld.dims)
     if fld.state == sthdr {
       fld.dims = append(fld.dims, uint(larger))
     }
