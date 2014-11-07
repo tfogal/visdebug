@@ -34,12 +34,12 @@ void main() {
 `
 
 func flush_errors(pre string) {
-  gfx.Trace(pre)
   for {
     errnum := gl.GetError()
     if errnum == 0 {
       break
     }
+    gfx.Trace(pre)
     gfx.Error("GL error: 0x%x\n", errnum)
     os.Exit(1)
   }
@@ -48,6 +48,7 @@ func flush_errors(pre string) {
     if len(msg) <= 0 {
       break
     }
+    gfx.Trace(pre)
     gfx.Warning("msg: '%s' from %v (type=0x%x, id=%d)", msg, src, typ, id)
   }
 }
