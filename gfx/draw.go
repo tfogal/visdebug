@@ -179,6 +179,7 @@ func (s s2d) Render(data []float32, dims []uint, maximum float32) {
     flush_errors("about to set texture data...")
     gl.TexImage2D(gl.TEXTURE_2D, 0, intformat, int(dims[0]),int(dims[1]), 0,
                   format, typ, data)
+    s.program.Use()
     flush_errors("set texture")
 
     s.fldmaxloc.Uniform1f(maximum)
