@@ -1,12 +1,19 @@
 F95=gfortran
-COMMON=-Wall -Wextra -gdwarf-3 -fPIC -fno-omit-frame-pointer
+COMMON=-Wall -Wextra -gdwarf-3 -fPIC -fno-omit-frame-pointer -m64
 CXXFLAGS:=-std=c++11 $(COMMON)
 CFLAGS:=-std=gnu99 $(COMMON)
 FFLAGS:=$(COMMON)
 obj:=3dloop.o vardim.o switch.o bcont.o nested.o loops.o waitfor.o \
-  tiny.o use.o smooth3d.o stack.o indirect.o
+  tiny.o use.o smooth3d.o stack.o indirect.o linpack.o
 all: $(obj) 3dloop dimensional branching contbreak nest forloops pauser s3d \
-  checkstack indirect handle relax
+  checkstack indirect handle relax linpack
+
+# linpack needs a couple custom compiler flags.
+linpack.o: linpack.c
+	$(CC) -c $(CFLAGS) -DSP -DROLL $< -o $@
+
+linpack: linpack.o
+	$(CC) $(CFLAGS) $^ -o $@ $(LDLIBS) -lm
 
 relax: heat.o
 	$(CC) $(CFLAGS) $^ -o $@ $(LDLIBS)
