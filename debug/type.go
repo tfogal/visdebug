@@ -154,6 +154,29 @@ func function(entry *dwarf.Entry) string {
   return ""
 }
 
+type memosearchkey struct {
+  program string
+  target dwarfEntry
+}
+type memosearchvalue struct {
+  ret *dwarf.Entry
+  err error
+}
+var typesearch_memo map[memosearchkey]memosearchvalue
+func init() {
+  typesearch_memo = make(map[memosearchkey]memosearchvalue)
+}
+
+func searchmemo(program string, target dwarfEntry) (*dwarf.Entry, error) {
+  sv := typesearch_memo[memosearchkey{program, target}]
+  if sv.ret == nil && sv.err == nil {
+    entry, err := searchfor(program, target)
+    sv = memosearchvalue{entry, err}
+    typesearch_memo[memosearchkey{program, target}] = sv
+  }
+  return sv.ret, sv.err
+}
+
 func searchfor(program string, target dwarfEntry) (*dwarf.Entry, error) {
   legolas, err := elf.Open(program)
   if err != nil {
@@ -217,7 +240,7 @@ func TypeGlobalVar(program string, address uintptr) (Type, error) {
   // doing this until we find *something*, then check if the something we found
   // extends beyond the access address we're looking for.
   for addr := address; ent == nil && addr > 0x400000; addr -= 0x1 {
-    ent, err = searchfor(program, dwfGlobalVar{addr: addr})
+    ent, err = searchmemo(program, dwfGlobalVar{addr: addr})
     if err == io.EOF {
       continue
     }
@@ -250,7 +273,7 @@ func TypeGlobalVar(program string, address uintptr) (Type, error) {
 // identifies a local (parameter or local variable), described by a (fqn,
 // offset-off-of-fptr) pair.
 func TypeLocal(program string, fqn string, rel int64) (Type, error) {
-  entry, err := searchfor(program, dwfLocal{fbrel: rel, fqn: fqn})
+  entry, err := searchmemo(program, dwfLocal{fbrel: rel, fqn: fqn})
   if err != nil {
     return Type{}, err
   }
