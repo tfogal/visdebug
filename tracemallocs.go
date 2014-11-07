@@ -42,5 +42,5 @@ func supervise(argv []string, ie InferiorEvent) {
       return
     }
   }
-  fmt.Printf("[sup] %s exited normally.\n", argv[0])
+  fmt.Printf("[s] %s exited normally.\n", argv[0])
 }

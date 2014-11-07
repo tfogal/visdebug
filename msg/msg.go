@@ -32,7 +32,7 @@ const (
 
 func (c stdoutchn) Error(format string, a ... interface{}) {
   if (c.on & bit_ERROR) != 0 {
-    fmt.Fprintf(os.Stderr, "%s", cred)
+    fmt.Fprintf(os.Stderr, "%s[s] ", cred)
     fmt.Fprintf(os.Stderr, format, a...)
     if format[len(format)-1] != '\n' {
       fmt.Printf("\n")
@@ -43,7 +43,7 @@ func (c stdoutchn) Error(format string, a ... interface{}) {
 
 func (c stdoutchn) Warning(format string, a ... interface{}) {
   if (c.on & bit_WARNING) > 0 {
-    fmt.Fprintf(os.Stderr, "%s", cyellow)
+    fmt.Fprintf(os.Stderr, "%s[s] ", cyellow)
     fmt.Fprintf(os.Stderr, format, a...)
     if format[len(format)-1] != '\n' {
       fmt.Printf("\n")
@@ -53,6 +53,7 @@ func (c stdoutchn) Warning(format string, a ... interface{}) {
 }
 func (c stdoutchn) Trace(format string, a ... interface{}) {
   if (c.on & bit_TRACE) > 0 {
+    fmt.Printf("[s] ")
     fmt.Printf(format, a...)
     if format[len(format)-1] != '\n' {
       fmt.Printf("\n")

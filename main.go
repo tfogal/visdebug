@@ -266,7 +266,7 @@ func MainSync(program string, inferior *ptrace.Tracee) error {
   iptr, err := inferior.GetIPtr()
   if err != nil { return err }
   // now we're at main and the program is stopped.
-  fmt.Printf("[sup] process %d hit main at 0x%0x\n", inferior.PID(), iptr)
+  fmt.Printf("[s] process %d hit main at 0x%0x\n", inferior.PID(), iptr)
 
   // not sure this belongs here, but we need these and this is the first place
   // we can actually read symbols from the process.
@@ -1102,7 +1102,7 @@ func alloc_inferior(inferior *ptrace.Tracee, mmap uintptr,
   }
 
   // I'm so hilarious:
-  fmt.Println("[sup] Now back to your regularly scheduled programming.")
+  fmt.Println("[s] Now back to your regularly scheduled programming.")
   if err := inferior.SetRegs(orig_regs) ; err != nil {
     return 0x0, err
   }
