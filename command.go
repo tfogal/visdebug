@@ -817,7 +817,7 @@ func symexec(inferior *ptrace.Tracee, addr uintptr) ([]register_file, error) {
             rf[movregtarget(ixn)] = refconst
           } else if ref_isaddr {
             rf[movregtarget(ixn)] = refaddr
-            // want to see an example in the wild; make it stand out for now
+            // I want to see an example in the wild; make it stand out for now
             // by returning an error so i can examine this when it happens.
             return nil, fmt.Errorf("not sure this is right, being cautious..")
           } else if ref_isvar {
@@ -831,7 +831,7 @@ func symexec(inferior *ptrace.Tracee, addr uintptr) ([]register_file, error) {
           }
         }
       }
-      symlog.Trace("%v\n", rf)
+      //symlog.Trace("%v\n", rf)
     }
     rfile = append(rfile, rf)
 
