@@ -396,10 +396,9 @@ func SymbolsProcess(inferior *ptrace.Tracee) ([]Symbol, error) {
       if strings.Contains(lmap.libname, need) {
         // Add every symbol, but only if it won't create duplicates.
         for _, librarysym := range libsym {
-          // HDF5 seems to have some crazy internal malloc that is overwriting
-          // and thus ruining our malloc.
-          if strings.Contains(lmap.libname, "hdf5") &&
-             librarysym.Name() == "malloc" {
+          // malloc and free are important.  Don't accept any imitations.
+          if (librarysym.Name() == "malloc" || librarysym.Name() == "free") &&
+             !strings.Contains(lmap.libname, "libc.so") {
             continue
           }
           ls := find_symbol(librarysym.Name(), symbols)
