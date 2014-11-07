@@ -44,7 +44,7 @@ func (c stdoutchn) Error(format string, a ... interface{}) {
 func (c stdoutchn) Warning(format string, a ... interface{}) {
   if (c.on & bit_WARNING) > 0 {
     fmt.Fprintf(os.Stderr, "%s", cyellow)
-    fmt.Printf(format, a...)
+    fmt.Fprintf(os.Stderr, format, a...)
     if format[len(format)-1] != '\n' {
       fmt.Printf("\n")
     }
