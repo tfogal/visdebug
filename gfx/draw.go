@@ -98,9 +98,6 @@ func s2dprogram() gl.Program {
   program.Link()
   program.Use()
 
-  fldmax := program.GetUniformLocation("fieldmax")
-  gfx.Trace("field max loc is: %v\n", fldmax)
-
   pos := program.GetAttribLocation("position")
   pos.EnableArray()
   pos.AttribPointer(2, gl.FLOAT, false, 0, nil)
@@ -150,6 +147,7 @@ func (s s2d) Pre() error {
     flush_errors("setting '" + tex2dname + "' uniform.")
 
     s.fldmaxloc = s.program.GetUniformLocation("fieldmax")
+    gfx.Trace("field max loc is: %v\n", s.fldmaxloc)
     return nil
   })
 }
