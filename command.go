@@ -650,12 +650,18 @@ func readreg(regref x86asm.Reg, inferior *ptrace.Tracee) (uint64, error) {
   case x86asm.RAX: v = regs.Rax
   case x86asm.EAX: v = regs.Rax & 0xffffffff
   case x86asm.RCX: v = regs.Rcx
+  case x86asm.ECX: v = regs.Rcx & 0xffffffff
   case x86asm.RDX: v = regs.Rdx
+  case x86asm.EDX: v = regs.Rdx & 0xffffffff
   case x86asm.RBX: v = regs.Rbx
+  case x86asm.EBX: v = regs.Rbx & 0xffffffff
   case x86asm.RSP: v = regs.Rsp
   case x86asm.RBP: v = regs.Rbp
+  case x86asm.EBP: v = regs.Rbp & 0xffffffff
   case x86asm.RSI: v = regs.Rsi
+  case x86asm.ESI: v = regs.Rsi & 0xffffffff
   case x86asm.RDI: v = regs.Rdi
+  case x86asm.EDI: v = regs.Rdi & 0xffffffff
   case x86asm.R8: v = regs.R8
   case x86asm.R9: v = regs.R9
   default:
