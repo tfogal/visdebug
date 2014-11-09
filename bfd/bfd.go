@@ -401,6 +401,10 @@ func SymbolsProcess(inferior *ptrace.Tracee) ([]Symbol, error) {
              !strings.Contains(lmap.libname, "libc.so") {
             continue
           }
+          if !strings.Contains(lmap.libname, "libc.so") &&
+             librarysym.Name() == "posix_memalign" {
+            return nil, fmt.Errorf("memalign in %s!", lmap.libname)
+          }
           ls := find_symbol(librarysym.Name(), symbols)
           if ls == nil {
             symbols = append(symbols, librarysym)
