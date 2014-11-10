@@ -86,6 +86,7 @@ var malloctrace bool
 var memhandle bool
 var vis2d bool
 var minsize uint
+var null bool
 func init() {
   runtime.LockOSThread()
   flag.BoolVar(&symlist, "symbols", false, "print out the symbol table")
@@ -99,6 +100,7 @@ func init() {
                                          "invalid memory handling")
   flag.BoolVar(&vis2d, "v2d", false, "visualize 2D data")
   flag.UintVar(&minsize, "size", 0, "allocation size to threshold")
+  flag.BoolVar(&null, "null", false, "use null malloc tracer")
 }
 
 func basename(s string) (string) {
@@ -150,6 +152,10 @@ func main() {
   if malloctrace {
     var mt MallocTrace
     supervise(argv, &mt)
+  }
+  if null {
+    var n Null
+    supervise(argv, &n)
   }
   if vis2d {
     var vmem visualmem2D
