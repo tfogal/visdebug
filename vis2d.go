@@ -432,6 +432,11 @@ func (v *visualmem2D) free(inferior *ptrace.Tracee, bp debug.Breakpoint) error {
   }
 
   freearg := uintptr(stk.Arg1(inferior)) // what they're freeing
+  // if it's not page-aligned, this isn't our buffer.
+  if freearg == 0x0 || freearg & 0xfff > 0 {
+    v2d.Trace("0x%x is not ours.", freearg)
+    return nil
+  }
   alc, err := v.pages(freearg) // figure out pages from address
   v2d.Trace("free(0x%x) [ours: %v]", freearg, err==nil)
   if err != nil {
