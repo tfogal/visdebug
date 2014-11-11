@@ -758,11 +758,17 @@ func user_symbol(name string) bool {
   if strings.HasPrefix(name, "Py_") { // i.e. python symbols
     return false
   }
-  if strings.HasPrefix(name, "_IO_") { // internal glibc IO symbols
+  if strings.HasPrefix(name, "_") { // internal gcc/glibc IO symbols
+    return false
+  }
+  // internal gcc/glibc IO symbols
+  if strings.HasPrefix(name, "MPI_") || strings.HasPrefix(name, "mpi_") {
     return false
   }
   syms := []string{
-    "envz_strip", "fgets", "free", "getpagesize", "mmap", "memset",
+    "argz_create_sep",
+    "ntp_gettimex",
+    "envz_strip", "fgets", "free", "getpagesize", "mmap", "memccpy", "memset",
     "mprotect", "posix_memalign",
   }
 
