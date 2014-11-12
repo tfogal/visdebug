@@ -4,6 +4,7 @@ package gfx
 // #include <SDL2/SDL_opengl.h>
 import "C"
 import "os"
+import "log"
 import "github.com/go-gl/gl"
 import "github.com/veandco/go-sdl2/sdl"
 
@@ -14,8 +15,8 @@ in highp vec2 position;
 out mediump vec2 tcoord;
 
 void main() {
-  gl_Position = vec4(position, 0.0, 1.0);
-  tcoord = gl_Position.xy;
+gl_Position = vec4(position, 0.0, 1.0);
+tcoord = gl_Position.xy;
 }
 `
 const fragshader = `
@@ -32,7 +33,6 @@ void main() {
   fragColor = vec4(value, 0.0, 1.0-value, 1.0);
 }
 `
-
 func flush_errors(pre string) {
   for {
     errnum := gl.GetError()
@@ -50,6 +50,7 @@ func flush_errors(pre string) {
     }
     gfx.Trace(pre)
     gfx.Warning("msg: '%s' from %v (type=0x%x, id=%d)", msg, src, typ, id)
+    log.Fatalf("dying.\n")
   }
 }
 
@@ -186,7 +187,8 @@ func (s s2d) Render(data []float32, dims []uint, maximum float32) {
                   format, typ, data)
     flush_errors("set texture")
 
-    s.fldmaxloc.Uniform1f(maximum)
+    gfx.Trace("uniform %v := %f\n", s.fldmaxloc, maximum)
+    //s.fldmaxloc.Uniform1f(maximum)
     flush_errors("set fieldmax uniform:")
 
     gl.Clear(gl.COLOR_BUFFER_BIT)
