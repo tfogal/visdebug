@@ -4,9 +4,12 @@ CXXFLAGS:=-std=c++11 $(COMMON)
 CFLAGS:=-std=gnu99 $(COMMON)
 FFLAGS:=$(COMMON)
 obj:=3dloop.o vardim.o switch.o bcont.o nested.o loops.o waitfor.o \
-  tiny.o use.o smooth3d.o stack.o indirect.o linpack.o
+  tiny.o use.o smooth3d.o stack.o indirect.o linpack.o allocs.o
 all: $(obj) 3dloop dimensional branching contbreak nest forloops pauser s3d \
-  checkstack indirect handle relax linpack
+  checkstack indirect handle relax linpack nallocs
+
+nallocs: allocs.o
+	$(CC) $(CFLAGS) $^ -o $@ $(LDLIBS)
 
 # linpack needs a couple custom compiler flags.
 linpack.o: linpack.c
