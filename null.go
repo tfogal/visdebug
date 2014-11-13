@@ -8,7 +8,6 @@ import (
 // Null is like MallocTrace, but does no prints.
 type Null struct {
   BaseEvent
-  alloc allocation
   maddr uintptr
   faddr uintptr
 }
