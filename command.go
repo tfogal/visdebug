@@ -664,6 +664,12 @@ func readreg(regref x86asm.Reg, inferior *ptrace.Tracee) (uint64, error) {
   case x86asm.EDI: v = regs.Rdi & 0xffffffff
   case x86asm.R8: v = regs.R8
   case x86asm.R9: v = regs.R9
+  case x86asm.R10: v = regs.R10
+  case x86asm.R11: v = regs.R11
+  case x86asm.R12: v = regs.R12
+  case x86asm.R13: v = regs.R13
+  case x86asm.R14: v = regs.R14
+  case x86asm.R15: v = regs.R15
   default:
     fmt.Printf("register: %v\n", regref)
     panic("unhandled case")
