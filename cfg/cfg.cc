@@ -275,7 +275,7 @@ cfg_address(const char* program, const uintptr_t address, size_t* nnodes)
   std::unique_ptr<CodeObject> co(new CodeObject(sts));
   co->parse(static_cast<Dyninst::Address>(address), false);
   Function* f = co->findFuncByEntry(funcregion, address);
-  assert(f != NULL);
+  assert(f != NULL && "i.e. we found a fqn at that address");
   f->blocks(); // we do this because it finalize()s the fqn (as a side effect)
   return cfg_from_fqn(f, nnodes);
 }
