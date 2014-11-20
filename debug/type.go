@@ -267,7 +267,7 @@ func TypeGlobalVar(program string, address uintptr) (Type, error) {
     }
     return Type{offset: offs, Type: ty}, nil
   }
-  return Type{}, fmt.Errorf("impossible")
+  return Type{}, fmt.Errorf("not found.  not a gvar or not an array?")
 }
 
 // identifies a local (parameter or local variable), described by a (fqn,
