@@ -749,7 +749,7 @@ func break_ret(inferior *ptrace.Tracee) (debug.Breakpoint, error) {
 // `uninteresting' function is calloc: it will write to the allocated
 // memory, but we don't care about any write it would ever do.
 func user_symbol(name string) bool {
-  if strings.Contains(name, "@@") {
+  if strings.Contains(name, "@@") || strings.Contains(name, ".") {
     return false
   }
   if strings.HasPrefix(name, "H5") { // i.e. HDF5 symbols.
