@@ -766,8 +766,14 @@ func user_symbol(name string) bool {
     return false
   }
   syms := []string{
+    "argz_append",
     "argz_create_sep",
+    "getdelim",
+    "getpwuid",
     "ntp_gettimex",
+    "strdup",
+    "tsearch",
+    "vasprintf",
     "envz_strip", "fgets", "free", "getpagesize", "mmap", "memccpy", "memset",
     "mprotect", "posix_memalign",
   }
