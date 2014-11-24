@@ -49,7 +49,7 @@ func flush_errors(pre string) {
       break
     }
     gfx.Trace(pre)
-    gfx.Warning("msg: '%s' from %v (type=0x%x, id=%d)", msg, src, typ, id)
+    gfx.Warn("msg: '%s' from %v (type=0x%x, id=%d)", msg, src, typ, id)
     log.Fatalf("dying.\n")
   }
 }
@@ -180,7 +180,7 @@ func (s s2d) Render(data []float32, dims []uint, maximum float32) {
     const intformat = gl.R32F
     flush_errors("validating state on entry")
     if dims[0] > 8192 || dims[1] > 8192 {
-      gfx.Warning("%dx%d data is too large; skipping it.", dims[0], dims[1])
+      gfx.Warn("%dx%d data is too large; skipping it.", dims[0], dims[1])
       return nil
     }
     gl.TexImage2D(gl.TEXTURE_2D, 0, intformat, int(dims[0]),int(dims[1]), 0,

@@ -636,7 +636,7 @@ func readmem(memref x86asm.Mem, inferior *ptrace.Tracee) (uint64, error) {
   // ... but for really old code, the index is 4-bytes, and if "the next stuff"
   // in memory is non-zero at the time we read, then we'll grab that stuff.
   if int64(val) != int64(int32(val)) {
-    typeinfo.Warning("4-byte index variable?  Might just be old code.\n")
+    typeinfo.Warn("4-byte index variable?  Might just be old code.\n")
   }
   return uint64(int64(int32(val))), nil
 }
@@ -945,15 +945,15 @@ func readvalue(arg x86asm.Arg, ixnlen int, rf register_file, fqn string,
     if src_local {
       typ, err = debug.TypeLocal(globals.program, fqn, int64(lv))
       if err != nil {
-        typeinfo.Warning("Lvar type (%s, 0x%0x) lookup error: %v\n", fqn,
-                         int64(lv), err)
+        typeinfo.Warn("Lvar type (%s, 0x%0x) lookup error: %v\n", fqn,
+                      int64(lv), err)
         typ = debug.Type{}
       }
     }
     if src_memaddr {
       typ, err = debug.TypeGlobalVar(globals.program, uintptr(maddr))
       if err != nil {
-        typeinfo.Warning("Gvar (0x%0x) lookup error: %v\n", uintptr(maddr), err)
+        typeinfo.Warn("Gvar (0x%0x) lookup error: %v\n", uintptr(maddr), err)
         typ = debug.Type{}
       }
     }
@@ -979,8 +979,8 @@ func readvalue(arg x86asm.Arg, ixnlen int, rf register_file, fqn string,
     if mem.Base == x86asm.RBP {
       typ, err := debug.TypeLocal(globals.program, fqn, int64(int32(mem.Disp)))
       if err != nil {
-        typeinfo.Warning("lvar type (%s, 0x%0x) lookup error: %v\n", fqn,
-                         int32(mem.Disp), err)
+        typeinfo.Warn("lvar type (%s, 0x%0x) lookup error: %v\n", fqn,
+                      int32(mem.Disp), err)
         typ = debug.Type{}
       }
       return value{v: memarg, typ: typ}, nil
@@ -989,8 +989,7 @@ func readvalue(arg x86asm.Arg, ixnlen int, rf register_file, fqn string,
       address := int64(rf[x86asm.RIP].(memaddr)) + mem.Disp
       typ, err := debug.TypeGlobalVar(globals.program, uintptr(address))
       if err != nil {
-        typeinfo.Warning("gvar (0x%0x) lookup error: %v\n", uintptr(address),
-                         err)
+        typeinfo.Warn("gvar (0x%0x) lookup error: %v\n", uintptr(address), err)
         typ = debug.Type{}
       }
       return value{v: memarg, typ: typ}, nil

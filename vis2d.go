@@ -83,7 +83,7 @@ func (v *visualmem2D) malloc(inferior *ptrace.Tracee,
   {
     symbol, err := find_function(retaddr)
     if err != nil {
-      v2d.Warning("can't find fqn from 0x%x: %v", retaddr, err)
+      v2d.Warn("can't find fqn from 0x%x: %v", retaddr, err)
     } else {
       if !user_symbol(symbol.Name()) {
         v2d.Trace("Allocating memory in %s?  We don't care.", symbol.Name())
@@ -208,12 +208,12 @@ func (v *visualmem2D) access(inferior *ptrace.Tracee, pages allocation) error {
   if err != nil && err != debug.ErrAlreadyBroken {
     // okay... try again assuming we are not in a prologue/epilogue.
     raddr = stk.RetAddrMid(inferior)
-    v2d.Warning("bad return address (%v). will try @ 0x%x", err, raddr)
+    v2d.Warn("bad return address (%v). will try @ 0x%x", err, raddr)
     err := v.AddBP(inferior, raddr, v.accessret)
     if err != nil && err != debug.ErrAlreadyBroken {
       // *still* no luck.  Okay, just search for a 'ret' insn, but from the top
       // of the function we are in now, not the current iptr
-      v2d.Warning("That failed too (%v); searching for ret instead.", err)
+      v2d.Warn("That failed too (%v); searching for ret instead.", err)
       symbol, err := where(inferior)
       if err != nil {
         return fmt.Errorf("dunno where are: %v", err)
@@ -246,7 +246,7 @@ func (v *visualmem2D) access(inferior *ptrace.Tracee, pages allocation) error {
   if !user_symbol(symbol.Name()) {
     return nil
   }
-  v2d.Warning("building '%v' CFG", symbol)
+  v2d.Warn("building '%v' CFG", symbol)
   graph := memocfg(symbol)
   bb, err := basic_block(graph, whereis(inferior))
   if err != nil {
@@ -349,15 +349,15 @@ func (v *visualmem2D) vis(inferior *ptrace.Tracee, addr uintptr) error {
   assert(fld.gsfield != nil) // i.e. this is a valid field.
 
   if fld.dims == nil {
-    v2d.Warning("dims is nil, ignoring")
+    v2d.Warn("dims is nil, ignoring")
     return nil
   }
   if len(fld.dims) != 2 {
-    v2d.Warning("dims array length is not 2 (%d), ignoring", len(fld.dims))
+    v2d.Warn("dims array length is not 2 (%d), ignoring", len(fld.dims))
     return nil
   }
   if fld.dims[0]*fld.dims[1] <= 0 {
-    v2d.Warning("dims not positive (%dx%d)", fld.dims[0], fld.dims[1])
+    v2d.Warn("dims not positive (%dx%d)", fld.dims[0], fld.dims[1])
     return nil
   }
   if fld.dims != nil && len(fld.dims) == 2 && fld.dims[0]*fld.dims[1] > 0 {
@@ -383,8 +383,8 @@ func (v *visualmem2D) vis(inferior *ptrace.Tracee, addr uintptr) error {
 func (v *visualmem2D) accessret(inferior *ptrace.Tracee,
                                 bp debug.Breakpoint) error {
   if v.todeny == nil {
-    v2d.Warning("Nothing to re-enable.  This means that the current function" +
-                " free()d all memory that it accessed.  Unlikely but possible.")
+    v2d.Warn("Nothing to re-enable.  This means that the current function" +
+             " free()d all memory that it accessed.  Unlikely but possible.")
     return nil
   }
   v2d.Trace("Re-enabling protection for %d allocs.", len(v.todeny))
@@ -446,7 +446,7 @@ func (v *visualmem2D) free(inferior *ptrace.Tracee, bp debug.Breakpoint) error {
   }
   assert(alc.base == freearg)
   if err := v.DropWatch(inferior, alc) ; err != nil {
-    v2d.Warning("We weren't watching %v... (%v)\n", alc, err)
+    v2d.Warn("We weren't watching %v... (%v)\n", alc, err)
     return err
   }
   v.destroy(alc.base)

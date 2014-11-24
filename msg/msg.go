@@ -11,7 +11,7 @@ import "os"
 
 type Channel interface {
   Error(format string, a ... interface{})
-  Warning(format string, a ... interface{})
+  Warn(format string, a ... interface{})
   Trace(format string, a ... interface{})
 }
 
@@ -41,7 +41,7 @@ func (c stdoutchn) Error(format string, a ... interface{}) {
   }
 }
 
-func (c stdoutchn) Warning(format string, a ... interface{}) {
+func (c stdoutchn) Warn(format string, a ... interface{}) {
   if (c.on & bit_WARNING) > 0 {
     fmt.Fprintf(os.Stderr, "%s[s] ", cyellow)
     fmt.Fprintf(os.Stderr, format, a...)
