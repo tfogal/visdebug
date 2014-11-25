@@ -162,6 +162,8 @@ func main() {
     go func() { // gfx stuff needs to go into another thread.
       if err := gfx.Context() ; err != nil { // establish OGL stuff.
         evc.Trace("Could not establish context: %v, skipping..\n", err)
+        gfx.Close()
+        return
       }
       supervise(argv, &vmem)
       gfx.Close()
