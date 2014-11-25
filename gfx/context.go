@@ -57,9 +57,13 @@ func Context() error {
     sdl.GL_SetAttribute(C.SDL_GL_CONTEXT_MINOR_VERSION, 1)
     sdl.GL_SetAttribute(sdl.GL_CONTEXT_DEBUG_FLAG, 1)
     sdl.GL_SetAttribute(sdl.GL_CONTEXT_FLAGS , sdl.GL_CONTEXT_DEBUG_FLAG)
-    window = sdl.CreateWindow("vismem", sdl.WINDOWPOS_UNDEFINED,
-                              sdl.WINDOWPOS_UNDEFINED,
-                              800, 600, sdl.WINDOW_SHOWN | sdl.WINDOW_OPENGL)
+    var err error // so we can use = and access the global 'window' var.
+    window, err = sdl.CreateWindow("vismem", sdl.WINDOWPOS_UNDEFINED,
+                                   sdl.WINDOWPOS_UNDEFINED, 800, 600,
+                                   sdl.WINDOW_SHOWN | sdl.WINDOW_OPENGL)
+    if err != nil {
+      return err
+    }
     glctx = sdl.GL_CreateContext(window)
     sdl.GL_MakeCurrent(window, glctx)
 
