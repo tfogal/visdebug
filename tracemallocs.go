@@ -15,7 +15,10 @@ func supervise(argv []string, ie InferiorEvent) {
   }
   defer inferior.Close()
 
-  ie.Setup(inferior)
+  if err := ie.Setup(inferior) ; err != nil {
+    evc.Error("Could not initialize event handler: %v", err)
+    return
+  }
   defer ie.Close(inferior)
 
   for {
