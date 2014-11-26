@@ -73,14 +73,17 @@ func (p *Python) Setup(inferior *ptrace.Tracee) error {
 }
 
 func (p *Python) Close(inferior *ptrace.Tracee) error {
-  if err := python.Finalize() ; err != nil {
-    return err
-  }
-
   python.PyDict_Clear(p.dict)
   p.dict.Clear()
   p.module.Clear()
-  p.data.Clear()
+  p.pydata.Clear()
+  p.dict = nil
+  p.module = nil
+  p.pydata = nil
+
+  if err := python.Finalize() ; err != nil {
+    return err
+  }
 
   pyc.Trace("Finalized.\n")
   return nil
