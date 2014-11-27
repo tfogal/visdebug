@@ -6,8 +6,8 @@ import(
   "github.com/tfogal/ptrace"
 )
 
-type BPcb func(*ptrace.Tracee, debug.Breakpoint) error
-type SFcb func(*ptrace.Tracee, allocation) error
+type BPcb func(*ptrace.Tracee, debug.Breakpoint) error // breakpoint callback
+type SFcb func(*ptrace.Tracee, allocation) error // segfault callback
 
 // Registers and handles events for an inferior.  The client will register a
 // set of breakpoints and regions to watch (i.e. memory protect), and this will
@@ -53,6 +53,21 @@ type BaseEvent struct {
 func (be *BaseEvent) Setup(*ptrace.Tracee) error {
   be.bp = make(map[uintptr][]breakelem)
   be.sf = make(map[uintptr]sfelem)
+  return nil
+}
+
+func (be *BaseEvent) Close(inferior *ptrace.Tracee) error {
+  for _, belems := range be.bp {
+    for _, bel := range belems {
+      be.DropBP(inferior, bel.bp.Address)
+    }
+  }
+  for _, sf := range be.sf {
+    be.DropWatch(inferior, sf.alloc)
+  }
+  be.bp = nil
+  be.sf = nil
+
   return nil
 }
 
