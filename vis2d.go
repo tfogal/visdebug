@@ -6,8 +6,6 @@ package main
 import(
   "fmt"
   "unsafe"
-  "./bfd"
-  "./cfg"
   "./debug"
   "./gfx"
   "./msg"
@@ -45,22 +43,6 @@ type visualmem2D struct {
   // a slice of pointers at field[x].allocs that we need to re-enable when this
   // function exits.
   todeny map[uintptr]*allocation
-}
-
-var graphs map[uintptr]map[uintptr]*cfg.Node
-func init() {
-  graphs = make(map[uintptr]map[uintptr]*cfg.Node)
-}
-func memocfg(addr *bfd.Symbol) map[uintptr]*cfg.Node {
-  if graphs[addr.Address()] == nil {
-    g := cfg.FromAddress(globals.program, addr.Address())
-    assert(g != nil)
-    rn := root_node(g, addr)
-    assert(rn != nil)
-    cfg.Analyze(rn)
-    graphs[addr.Address()] = g
-  }
-  return graphs[addr.Address()]
 }
 
 func (v *visualmem2D) destroy(fldaddr uintptr) {
