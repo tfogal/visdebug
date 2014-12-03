@@ -504,6 +504,12 @@ func (p *Python) Setup(inferior *ptrace.Tracee) error {
     return err
   }
 
+  // Setup the default argv.  Apparently PyRun_SimpleFile etc. will not do this
+  // for us, and then scripts will bail if they try to access sys.argv.  This
+  // fixes it.
+  argv := []string{"test.py"}
+  python.PySys_SetArgv(argv)
+
   p.dict = python.PyModule_GetDict(p.module)
   if p.dict == nil {
     return errors.New("newly-created module has no dict?")
