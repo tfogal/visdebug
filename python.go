@@ -37,7 +37,7 @@ type Python struct {
   dict *python.PyObject
 }
 
-var pyc = msg.StdChan()
+var pyc = msg.StdChan("pyc")
 
 func (p *Python) vis(inferior *ptrace.Tracee, addr uintptr) error {
   pyc.Trace("using alloc @ 0x%x", addr)

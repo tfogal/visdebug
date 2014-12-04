@@ -13,7 +13,7 @@ import(
   "github.com/tfogal/ptrace"
 )
 
-var v2d = msg.StdChan()
+var v2d = msg.StdChan("v2d")
 
 type fieldstate uint
 const(

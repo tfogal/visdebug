@@ -9,7 +9,7 @@ import "io"
 import "strings"
 import "../msg"
 
-var types = msg.StdChan()
+var types = msg.StdChan("types")
 
 type Type struct {
   offset dwarf.Offset

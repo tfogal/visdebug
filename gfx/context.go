@@ -9,7 +9,7 @@ import "github.com/go-gl/gl"
 import "github.com/veandco/go-sdl2/sdl"
 
 var gfxfunc = make(chan func())
-var gfx = msg.StdChan()
+var gfx = msg.StdChan("gfx")
 var glctx sdl.GLContext
 var window *sdl.Window
 

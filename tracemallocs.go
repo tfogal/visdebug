@@ -6,7 +6,7 @@ import(
   "./msg"
 )
 
-var evc = msg.StdChan()
+var evc = msg.StdChan("evc")
 
 func supervise(argv []string, ie InferiorEvent) {
   inferior, err := instrument(argv)

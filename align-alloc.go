@@ -10,7 +10,7 @@ import(
   "github.com/tfogal/ptrace"
 )
 
-var aach = msg.StdChan()
+var aach = msg.StdChan("aach")
 
 type AlignAlloc struct {
   BaseEvent

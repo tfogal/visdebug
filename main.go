@@ -26,9 +26,9 @@ import(
 )
 
 // for information regarding code injection
-var inject = msg.StdChan()
+var inject = msg.StdChan("inject")
 // progress / status of what's going on with memory protection.
-var protection = msg.StdChan()
+var protection = msg.StdChan("protection")
 
 func procstatus(pid int, stat syscall.WaitStatus) {
   if stat.CoreDump() { log.Fatalf("core dumped"); }

@@ -32,7 +32,7 @@ type CmdGlobal struct {
 // initialization info that commands might want to use.
 var globals CmdGlobal
 // logging type information
-var typeinfo = msg.StdChan()
+var typeinfo = msg.StdChan("typeinfo")
 
 func verify_symbols_loaded(inferior *ptrace.Tracee) error {
   if globals.symbols == nil {
@@ -755,7 +755,7 @@ func movregtarget(ixn x86asm.Inst) x86asm.Reg {
   return ixn.Args[0].(x86asm.Reg)
 }
 
-var symlog = msg.StdChan()
+var symlog = msg.StdChan("symlog")
 
 // symbolic execution of the inferior from the given address until the end of
 // its basic block.  For each assembly instruction we keep track of the
