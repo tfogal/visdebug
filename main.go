@@ -616,13 +616,11 @@ func ihandle(inferior *ptrace.Tracee) (ievent, error) {
     return nil, errors.New("abnormal termination (core dumped)")
   case status.Continued():
     return nil, fmt.Errorf("continued?  wtf? %v", status)
-  case status.Stopped() && status.StopSignal() == syscall.SIGCHLD:
-    // The process we are tracing had children, and its children (our
-    // grandchildren) died.  This isn't an event we'd care about, so we just
-    // 'skip' it by recursing.
-    return ihandle(inferior)
   case status.Stopped():
-    return nil, fmt.Errorf("trapped, not from BP: %v", status.TrapCause())
+    // There are many reasons a process might get Stopped: its children (i.e.
+    // our grandchildren) died, the user ^Z/fg'd it, etc.  None of these are
+    // things we'd care about, so just recurse and pretend they didn't happen.
+    return ihandle(inferior)
   }
   return status, fmt.Errorf("unknown wait status: %v", status)
 }
