@@ -67,7 +67,9 @@ func (c stdoutchn) Trace(format string, a ... interface{}) {
 func (c *stdoutchn) TestEnable(name string) {
   dbg := os.Getenv("DEBUG")
   c.on = bit_ERROR | bit_WARNING
-  if dbg != "" && dbg == "+all" { // easy check: all channels on?
+  if dbg == "" {
+    return
+  } else if dbg == "+all" { // easy check: all channels on?
     c.on = 0xffffffff
     return
   }
