@@ -186,7 +186,7 @@ func (s s2d) Render(data []float32, dims []uint, maximum float32) {
     flush_errors("set texture")
 
     gfx.Trace("uniform %v := %f\n", s.fldmaxloc, maximum)
-    //s.fldmaxloc.Uniform1f(maximum)
+    s.fldmaxloc.Uniform1f(maximum)
     flush_errors("set fieldmax uniform:")
 
     gl.Clear(gl.COLOR_BUFFER_BIT)
