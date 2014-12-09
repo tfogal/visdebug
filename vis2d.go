@@ -342,19 +342,18 @@ func (v *visualmem2D) vis(inferior *ptrace.Tracee, addr uintptr) error {
     v2d.Warn("dims not positive (%dx%d)", fld.dims[0], fld.dims[1])
     return nil
   }
-  if fld.dims != nil && len(fld.dims) == 2 && fld.dims[0]*fld.dims[1] > 0 {
-    // 'Read' needs []byte memory, annoyingly.
-    bslice := castf32b(fld.data)
-    assert(fld.data != nil)
-    if err := inferior.Read(fld.alloc.base, bslice) ; err != nil {
-      wo := addr_where(inferior.PID(), fld.alloc.base)
-      fmt.Printf("%v is in '%s'\n", fld.alloc, wo)
-      return fmt.Errorf("read failed: %v", err)
-    }
-    mx := maxf(fld.data)
-    v2d.Trace("calculated max of: %v\n", mx)
-    fld.gsfield.Render(fld.data, fld.dims, mx)
+
+  // 'Read' needs []byte memory, annoyingly.
+  bslice := castf32b(fld.data)
+  assert(fld.data != nil)
+  if err := inferior.Read(fld.alloc.base, bslice) ; err != nil {
+    wo := addr_where(inferior.PID(), fld.alloc.base)
+    fmt.Printf("%v is in '%s'\n", fld.alloc, wo)
+    return fmt.Errorf("read failed: %v", err)
   }
+  mx := maxf(fld.data)
+  v2d.Trace("calculated max of: %v\n", mx)
+  fld.gsfield.Render(fld.data, fld.dims, mx)
 
   return nil
 }
