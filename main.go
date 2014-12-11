@@ -405,9 +405,23 @@ func getpage(inferior *ptrace.Tracee) (uintptr, error) {
     return 0x0, errors.New("'main' not in symbol list!")
   }
 
+  { // if we're not currently at 'main', this could change behavior!
+    iptr, err := inferior.GetIPtr()
+    if err != nil {
+      return 0x0, fmt.Errorf("it is pitch dark: %v", err)
+    }
+    if iptr != main.Address() {
+      inject.Error("at 0x%x, not main (0x%x), when trying to inject!", iptr,
+                   main.Address())
+      return 0x0, fmt.Errorf("at 0x%x instead of main(0x%x)!", iptr,
+                             main.Address())
+    }
+    assert(iptr == main.Address())
+  }
+
   addr, err := alloc_inferior(inferior, mmap.Address(), main.Address())
   if err != nil {
-    return 0x0, err
+    return 0x0, fmt.Errorf("could not alloc: %v", err)
   }
 
   return addr, nil
@@ -722,6 +736,7 @@ func instrument(argv []string) (*ptrace.Tracee, error) {
     inferior.Close()
     return nil, fmt.Errorf("tjfmalloc failure: %v\n", err)
   }
+  inject.Trace("tjfmalloc initialized at 0x%x", tjfmalloc)
   tmalloc := bfd.MakeSymbol("__tjfmalloc", tjfmalloc, 0)
   globals.symbols = append(globals.symbols, tmalloc)
 
@@ -1120,7 +1135,13 @@ func alloc_inferior(inferior *ptrace.Tracee, mmap uintptr,
   }
   // We hacked our stack to return to main; wait until that happens.
   if err := debug.WaitUntil(inferior, main) ; err != nil {
-    return 0x0, fmt.Errorf("did not return to main: %v", err)
+    iptr, ierr := inferior.GetIPtr()
+    if ierr != nil {
+      return 0x0, fmt.Errorf("did not return to main: %v, and could not get " +
+                             "iptr: %v:", err, ierr)
+    }
+    return 0x0, fmt.Errorf("did not return to main(0x%x): %v, " +
+                           "returned to 0x%x", main, err, iptr)
   }
 
   // We're back from main.  What did 'mmap' give us?
