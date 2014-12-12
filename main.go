@@ -797,6 +797,7 @@ func user_symbol(name string) bool {
     "getdelim",
     "getpwuid",
     "ntp_gettimex",
+    "opal_malloc",
     "strdup",
     "tsearch",
     "vasprintf",
