@@ -340,6 +340,7 @@ var needed_libraries = []string{
   "libm.so",
   "libpthread.so",
   "libquadmath.so",
+  "librt.so",
   "libstdc++.so",
   "libutil.so",
   "libz.so",
