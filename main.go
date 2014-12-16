@@ -498,8 +498,8 @@ func iprotect(inferior *ptrace.Tracee, addr uintptr, len uint,
   // 'ret' on x86_64 reads *%rsp and jumps to that.  The easiest solution to
   // control execution, then, is to fill *%rsp with where our caller wants the
   // inferior to jump back to.
-  // But we don't just want to hack "arbitrary" memory locations in the
-  // inferior.  Save what's there now so that we can restore it when we're done.
+  // But we don't just want to hack "arbitrary" registers in the inferior.
+  // Save what's there now so that we can restore it when we're done.
   oretaddr, err := inferior.ReadWord(uintptr(regs.Rsp))
   if err != nil {
     return fmt.Errorf("could not save retaddr: %v", err)
