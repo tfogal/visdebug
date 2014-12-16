@@ -790,8 +790,9 @@ func user_symbol(name string) bool {
   if strings.HasPrefix(name, "_") { // internal gcc/glibc IO symbols
     return false
   }
-  // internal gcc/glibc IO symbols
-  if strings.HasPrefix(name, "MPI_") || strings.HasPrefix(name, "mpi_") {
+  // internal MPI functions
+  if strings.HasPrefix(name, "MPI_") || strings.HasPrefix(name, "mpi_") ||
+     strings.HasPrefix(name, "ompi_") {
     return false
   }
   syms := []string{
