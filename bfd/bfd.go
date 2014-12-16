@@ -9,14 +9,17 @@ import "C"
 import "debug/elf"
 import "errors"
 import "fmt"
-import "io/ioutil"
-import "log"
 import "os"
 import "reflect"
 import "sort"
 import "strings"
 import "unsafe"
 import "github.com/tfogal/ptrace"
+import "../msg"
+
+// easy way to enable/disable debugging prints.
+//var strm = os.Stdout
+var b = msg.StdChan("syms")
 
 /* BFD uses these values for defines it reads from. */
 const(
@@ -164,10 +167,6 @@ func Symbols(executable string) ([]Symbol, error) {
   return symbols, nil
 }
 
-// easy way to enable/disable debugging prints.
-//var strm = os.Stdout
-var strm = ioutil.Discard
-
 /* Somewhere inside the _DYNAMIC section of the inferior's memory, we should
  * find a DT_DEBUG symbol.  If there's no debug info at all, then eventually
  * we'll just run off the process' address space and get an errno while
@@ -184,16 +183,15 @@ func lmap_head(inferior *ptrace.Tracee, addr uintptr) uintptr {
       case elf.DT_NULL: /* not found! */
         panic("DT_DEBUG section not found, cannot find link_map")
       case elf.DT_DEBUG: {
-        fmt.Fprintf(strm, "found the debug tag at 0x%0x\n", dynaddr)
+        b.Trace("found the debug tag at 0x%0x\n", dynaddr)
         rdbg, err := inferior.ReadWord(dynaddr+uintptr(C.Elf64_Sxwordsz()))
         if err != nil { panic(err) }
-        fmt.Fprintf(strm, "r_debug starts at: 0x%x\n", rdbg)
+        b.Trace("r_debug starts at: 0x%x\n", rdbg)
         /* that gave us the address of the r_debug, but we want the link_map */
         rmapaddr := uintptr(rdbg) + uintptr(C.rmap_offset())
         lmap, err := inferior.ReadWord(rmapaddr)
         if err != nil {
-          fmt.Fprintf(os.Stderr, "deref link_map (0x%x) failed: %v\n",
-                      rmapaddr, err)
+          b.Error("deref link_map (0x%x) failed: %v\n", rmapaddr, err)
           panic("grabbing link_map")
         }
         return uintptr(lmap)
@@ -346,6 +344,67 @@ var needed_libraries = []string{
   "libz.so",
 }
 
+type libinfo struct {
+  name string  // library name (path)
+  base uintptr // base address that it is loaded in the process
+}
+
+// identifies the list of libraries currently loaded into the given process.
+// ADDR_DYNAMIC should be the address of the ELF header's "_DYNAMIC" section.
+func libraries(inferior *ptrace.Tracee,
+               addr_dynamic uintptr) ([]libinfo, error) {
+  b.Trace("reading _DYNAMIC section from 0x%x\n", addr_dynamic)
+  lmap_addr := lmap_head(inferior, addr_dynamic)
+  b.Trace("head is at: 0x%x\n", lmap_addr)
+
+  libs := make([]libinfo, 0)
+
+  for {
+    lmap, err := loadlinkmap(inferior, lmap_addr)
+    if err != nil {
+      return nil, fmt.Errorf("could not load link map 0x%x: %v", lmap_addr, err)
+    }
+    b.Trace("Library loaded at 0x%012x, next at 0x%x [%s]", lmap.l_addr,
+            lmap.l_next, lmap.libname)
+    lmap_addr = uintptr(C.uintptr(unsafe.Pointer(lmap.l_next))) // next round.
+    if lmap.libname == "" {
+      continue
+    }
+    libs = append(libs, libinfo{name: lmap.libname, base: uintptr(lmap.l_addr)})
+
+    if lmap_addr == 0x0 {
+      break
+    }
+  }
+
+  return libs, nil
+}
+
+// allows us to sort (and thus search) our imported symbol lists.
+type elfimport []elf.ImportedSymbol
+func (s elfimport ) Len() int { return len(s); }
+func (s elfimport) Less(i int, j int) bool { return s[i].Name < s[j].Name }
+func (s elfimport) Swap(i int, j int) { s[i], s[j] = s[j], s[i] }
+
+
+// removes from FROM all the symbols that also exist in SLIST.
+func drop_imported(from []Symbol, slist []elf.ImportedSymbol) []Symbol {
+  sort.Sort(elfimport(slist))
+
+  var dst []Symbol
+  for _, ls := range from {
+    idx := sort.Search(len(slist), func(i int) bool {
+      return slist[i].Name >= ls.name
+    })
+    // if it was not found, add it to our retval.
+    if idx >= len(slist) || slist[idx].Name != ls.name {
+      dst = append(dst, ls)
+    }
+  }
+
+  return dst
+}
+
 /* reads symbols from the process, properly relocating them to get their actual
  * address. */
 func SymbolsProcess(inferior *ptrace.Tracee) ([]Symbol, error) {
@@ -354,7 +413,7 @@ func SymbolsProcess(inferior *ptrace.Tracee) ([]Symbol, error) {
   symbols, err := Symbols(filename)
   if err != nil { return nil, err }
 
-  fmt.Fprintf(strm, "read %d symbols.\n", len(symbols))
+  b.Trace("read %d symbols.\n", len(symbols))
   dyidx := sort.Search(len(symbols), func(i int) bool {
     return symbols[i].name >= "_DYNAMIC"
   })
@@ -362,49 +421,56 @@ func SymbolsProcess(inferior *ptrace.Tracee) ([]Symbol, error) {
     return nil, errors.New("Could not find _DYNAMIC section.")
   }
 
-  fmt.Fprintf(strm, "reading _DYNAMIC section from 0x%x\n", symbols[dyidx].addr)
+  b.Trace("reading _DYNAMIC section from 0x%x\n", symbols[dyidx].addr)
   lmap_addr := lmap_head(inferior, symbols[dyidx].addr)
-  fmt.Fprintf(strm, "head is at: 0x%x\n", lmap_addr)
+  b.Trace("head is at: 0x%x\n", lmap_addr)
 
-  for {
-    lmap, err := loadlinkmap(inferior, lmap_addr)
-    if err != nil {
-      log.Fatalf("could not load link map 0x%x: %v\n", lmap_addr, err)
-    }
-    fmt.Fprintf(strm, "Library loaded at 0x%012x, next at 0x%x [%s]\n",
-                lmap.l_addr, lmap.l_next, lmap.libname)
-    lmap_addr = uintptr(C.uintptr(unsafe.Pointer(lmap.l_next))) // next round.
-    // skip empty libraries: no symbols we care about there
-    if lmap.libname == "" {
-      continue
-    }
+  libs, err := libraries(inferior, symbols[dyidx].addr)
+  if err != nil {
+    return nil, err
+  }
 
-    fp, err := os.Open(lmap.libname)
+  for _, lib := range libs {
+    b.Trace("loading lib '%s'\n", lib.name)
+
+    fp, err := os.Open(lib.name)
     if err != nil { // maybe happens with debug libraries that arent installed?
       continue
     }
     defer fp.Close()
+
     libsym, err := read_symbols_file(fp)
-    if err != nil { panic(err) }
+    if err != nil {
+      panic(err)
+    }
 
-    fmt.Fprintf(strm, "Read %d symbols from %s, relocating by 0x%x\n",
-                len(libsym), lmap.libname, lmap.l_addr)
+    // get rid of any imported symbols.  don't want to see these.
+    {
+      binary, err := elf.Open(lib.name)
+      if err != nil {
+        return nil, fmt.Errorf("reading %s debug info: %v", lib.name, err)
+      }
+      defer binary.Close()
 
-    relocate_symbols(libsym, uintptr(lmap.l_addr))
+      isyms, err := binary.ImportedSymbols() // unfortunately go 1.4+ only :-(
+      if err != nil {
+        panic(err)
+      }
+      libsym = drop_imported(libsym, isyms)
+    }
+
+    relocate_symbols(libsym, lib.base)
 
     // Some libraries are important.  Make sure to copy them over.
     for _, need := range needed_libraries {
-      if strings.Contains(lmap.libname, need) {
+      if strings.Contains(lib.name, need) {
         // Add every symbol, but only if it won't create duplicates.
         for _, librarysym := range libsym {
           // malloc and free are important.  Don't accept any imitations.
-          if (librarysym.Name() == "malloc" || librarysym.Name() == "free") &&
-             !strings.Contains(lmap.libname, "libc.so") {
+          if !strings.Contains(lib.name, "libc.so") &&
+             (librarysym.Name() == "malloc" || librarysym.Name() == "free" ||
+              librarysym.Name() == "posix_memalign") {
             continue
-          }
-          if !strings.Contains(lmap.libname, "libc.so") &&
-             librarysym.Name() == "posix_memalign" {
-            return nil, fmt.Errorf("memalign in %s!", lmap.libname)
           }
           ls := find_symbol(librarysym.Name(), symbols)
           if ls == nil {
@@ -416,10 +482,8 @@ func SymbolsProcess(inferior *ptrace.Tracee) ([]Symbol, error) {
 
     sort.Sort(SymList(libsym))
     fix_symbols(symbols, libsym)
-
-    if lmap_addr == 0x0 { break }
   }
   sort.Sort(SymList(symbols))
-  fmt.Fprintf(strm, "%d total symbols.\n", len(symbols))
+  b.Trace("%d total symbols.\n", len(symbols))
   return symbols, nil
 }
