@@ -787,7 +787,10 @@ func user_symbol(name string) bool {
   if strings.HasPrefix(name, "Py_") { // i.e. python symbols
     return false
   }
-  if strings.HasPrefix(name, "_") { // internal gcc/glibc IO symbols
+  // All glibc/gcc internal symbols begin with "_", by definition.  But,
+  // Fortran symbols inside a module are named __<module>_MOD_<symname>, and we
+  // do not want to ignore those.
+  if strings.HasPrefix(name, "_") && !strings.Contains(name, "MOD") {
     return false
   }
   // internal MPI functions

@@ -93,11 +93,14 @@ free_nodes(struct node* nds, size_t nodes)
 }
 #endif
 
+static bool contains(const std::string& haystack, const std::string& needle) {
+  return haystack.find(needle) != std::string::npos;
+}
 /* predicate for "internal" functions, garbage symbols/fqns that exist in the
  * symbol table but don't actually represent anything of merit. */
 static bool internalfqn(/*const*/ Function* f) {
   return f->name().empty() ||
-         f->name().front() == '_';
+         (f->name().front() == '_' && !contains(f->name(), "MOD"));
 }
 
 PURE
