@@ -589,18 +589,6 @@ func find_2arg(opcodes []x86asm.Op, inferior *ptrace.Tracee,
 }
 
 
-// this is garbage.  we shouldn't need to hardcode this in.
-func endianconvert(u uint64) uint64 {
-  buf := bytes.NewBuffer(make([]byte, 0))
-  binary.Write(buf, binary.BigEndian, u)
-  bts := buf.Bytes()
-  val := uint64(0)
-  for i:=uint(0); i < uint(len(bts)) ; i++ {
-    val |= uint64(bts[i]) << i
-  }
-  return val
-}
-
 // reads the inferior's memory according to the given memory reference.  the
 // bits are copied into the uint64 retval; if the data are not a uint64, then
 // you should cast it manually.
