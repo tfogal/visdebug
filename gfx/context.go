@@ -5,7 +5,7 @@ package gfx
 import "C"
 import "errors"
 import "../msg"
-import "github.com/go-gl/gl"
+import "github.com/go-gl-legacy/gl"
 import "github.com/veandco/go-sdl2/sdl"
 
 var gfxfunc = make(chan func())
@@ -64,7 +64,9 @@ func Context() error {
     if err != nil {
       return err
     }
-    glctx = sdl.GL_CreateContext(window)
+    if glctx, err = sdl.GL_CreateContext(window) ; err != nil {
+      return err;
+    }
     sdl.GL_MakeCurrent(window, glctx)
 
     if gl.Init() != 0 {

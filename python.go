@@ -499,7 +499,7 @@ func (p *Python) Setup(inferior *ptrace.Tracee) error {
   }
 
   var err error
-  p.module, err = python.Py_InitModule("simulation")
+  p.module, err = python.Py_InitModule("simulation", []python.PyMethodDef{})
   if err != nil {
     return err
   }

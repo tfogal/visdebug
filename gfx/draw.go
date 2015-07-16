@@ -5,7 +5,7 @@ package gfx
 import "C"
 import "os"
 import "log"
-import "github.com/go-gl/gl"
+import "github.com/go-gl-legacy/gl"
 import "github.com/veandco/go-sdl2/sdl"
 
 const tex2dname = "texScalar2D"
