@@ -184,7 +184,8 @@ func (v *visualmem2D) access(inferior *ptrace.Tracee, pages allocation) error {
   // By my reasoning, we are in the middle of a function (we just came back
   // from a call!).. but experience and testing shows that the stack is almost
   // always setup such that we are in a prologue/epilogue...
-  raddr := stk.RetAddrTop(inferior)
+  //raddr := stk.RetAddrTop(inferior)
+  raddr := stk.RetAddrMid(inferior)
   v2d.Trace("want to add re-enable protection @ 0x%x", raddr)
   err := v.AddBP(inferior, raddr, v.accessret)
   if err != nil && err != debug.ErrAlreadyBroken {
@@ -302,6 +303,7 @@ func (v *visualmem2D) header(inferior *ptrace.Tracee,
   if err != nil {
     return err
   }
+  // Hack.  We just assume the larger value is the loop bound.
   larger := maxvalue(values)
   for j, fld := range v.fields {
     if fld.state == stallow {

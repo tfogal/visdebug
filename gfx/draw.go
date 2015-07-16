@@ -71,7 +71,7 @@ type s2d struct {
 
 func ScalarField2D() Scalar2D {
   var s s2d
-  return s
+  return &s
 }
 
 
@@ -110,7 +110,7 @@ func s2dprogram() gl.Program {
 
 // creates the static data / OGL objects we need.  Must be called before
 // 'Render'.
-func (s s2d) Pre() error {
+func (s *s2d) Pre() error {
   return Exec(func() error {
     flush_errors("pre: start")
     s.vao = gl.GenVertexArray()
@@ -148,12 +148,13 @@ func (s s2d) Pre() error {
 
     s.fldmaxloc = s.program.GetUniformLocation("fieldmax")
     gfx.Trace("field max loc is: %v\n", s.fldmaxloc)
+    s.fldmaxloc.Uniform1f(1.998596)
     return nil
   })
 }
 
 // Cleans up our GL objects.  Resource leak if you forget to call.
-func (s s2d) Post() {
+func (s *s2d) Post() {
   Exec(func() error {
     s.program.Delete()
     s.vertvbo.Delete()
@@ -162,7 +163,7 @@ func (s s2d) Post() {
   })
 }
 
-func (s s2d) Render(data []float32, dims []uint, maximum float32) {
+func (s *s2d) Render(data []float32, dims []uint, maximum float32) {
   if len(dims) != 2 {
     gfx.Error("%d dimensional (%v) data cannot be handled by this 2d code",
               len(dims), dims)
@@ -186,7 +187,7 @@ func (s s2d) Render(data []float32, dims []uint, maximum float32) {
     flush_errors("set texture")
 
     gfx.Trace("uniform %v := %f\n", s.fldmaxloc, maximum)
-    s.fldmaxloc.Uniform1f(maximum)
+    //s.fldmaxloc.Uniform1f(maximum)
     flush_errors("set fieldmax uniform:")
 
     gl.Clear(gl.COLOR_BUFFER_BIT)
