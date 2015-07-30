@@ -148,7 +148,6 @@ func (s *s2d) Pre() error {
 
     s.fldmaxloc = s.program.GetUniformLocation("fieldmax")
     gfx.Trace("field max loc is: %v\n", s.fldmaxloc)
-    s.fldmaxloc.Uniform1f(1.998596)
     return nil
   })
 }
@@ -187,7 +186,7 @@ func (s *s2d) Render(data []float32, dims []uint, maximum float32) {
     flush_errors("set texture")
 
     gfx.Trace("uniform %v := %f\n", s.fldmaxloc, maximum)
-    //s.fldmaxloc.Uniform1f(maximum)
+    s.fldmaxloc.Uniform1f(maximum)
     flush_errors("set fieldmax uniform:")
 
     gl.Clear(gl.COLOR_BUFFER_BIT)
