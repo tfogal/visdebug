@@ -4,7 +4,6 @@ package bfd
 // #include <elf.h>
 // #include "syms.h"
 // #cgo CFLAGS: -std=gnu99
-// #cgo LDFLAGS: -lbfd
 import "C"
 import "debug/elf"
 import "errors"
