@@ -343,20 +343,20 @@ var needed_libraries = []string{
   "libz.so",
 }
 
-type libinfo struct {
-  name string  // library name (path)
-  base uintptr // base address that it is loaded in the process
+type Library struct {
+  Name string  // library name (path)
+  Base uintptr // base address that it is loaded in the process
 }
 
 // identifies the list of libraries currently loaded into the given process.
 // ADDR_DYNAMIC should be the address of the ELF header's "_DYNAMIC" section.
-func libraries(inferior *ptrace.Tracee,
-               addr_dynamic uintptr) ([]libinfo, error) {
+func Libraries(inferior *ptrace.Tracee,
+               addr_dynamic uintptr) ([]Library, error) {
   b.Trace("reading _DYNAMIC section from 0x%x\n", addr_dynamic)
   lmap_addr := lmap_head(inferior, addr_dynamic)
   b.Trace("head is at: 0x%x\n", lmap_addr)
 
-  libs := make([]libinfo, 0)
+  libs := make([]Library, 0)
 
   for {
     lmap, err := loadlinkmap(inferior, lmap_addr)
@@ -369,7 +369,7 @@ func libraries(inferior *ptrace.Tracee,
     if lmap.libname == "" {
       continue
     }
-    libs = append(libs, libinfo{name: lmap.libname, base: uintptr(lmap.l_addr)})
+    libs = append(libs, Library{Name: lmap.libname, Base: uintptr(lmap.l_addr)})
 
     if lmap_addr == 0x0 {
       break
@@ -421,17 +421,17 @@ func SymbolsProcess(inferior *ptrace.Tracee) ([]Symbol, error) {
   }
 
   b.Trace("reading _DYNAMIC section from 0x%x\n", symbols[dyidx].addr)
-  libs, err := libraries(inferior, symbols[dyidx].addr)
+  libs, err := Libraries(inferior, symbols[dyidx].addr)
   if err != nil {
     return nil, err
   }
 
   for _, lib := range libs {
-    b.Trace("loading lib '%s'\n", lib.name)
+    b.Trace("loading lib '%s'\n", lib.Name)
 
-    fp, err := os.Open(lib.name)
+    fp, err := os.Open(lib.Name)
     if err != nil { // maybe happens with debug libraries that arent installed?
-			b.Warn("Skipping library %s; can't open: %v", lib.name, err)
+			b.Warn("Skipping library %s; can't open: %v", lib.Name, err)
       continue
     }
     defer fp.Close()
@@ -443,9 +443,9 @@ func SymbolsProcess(inferior *ptrace.Tracee) ([]Symbol, error) {
 
     // get rid of any imported symbols.  don't want to see these.
     {
-      binary, err := elf.Open(lib.name)
+      binary, err := elf.Open(lib.Name)
       if err != nil {
-        return nil, fmt.Errorf("reading %s debug info: %v", lib.name, err)
+        return nil, fmt.Errorf("reading %s debug info: %v", lib.Name, err)
       }
       defer binary.Close()
 
@@ -456,15 +456,15 @@ func SymbolsProcess(inferior *ptrace.Tracee) ([]Symbol, error) {
       libsym = drop_imported(libsym, isyms)
     }
 
-    relocate_symbols(libsym, lib.base)
+    relocate_symbols(libsym, lib.Base)
 
     // Some libraries are important.  Make sure to copy them over.
     for _, need := range needed_libraries {
-      if strings.Contains(lib.name, need) {
+      if strings.Contains(lib.Name, need) {
         // Add every symbol, but only if it won't create duplicates.
         for _, librarysym := range libsym {
           // malloc and free are capital-I Important.  Accept no imitations.
-          if !strings.Contains(lib.name, "libc.so") &&
+          if !strings.Contains(lib.Name, "libc.so") &&
              (librarysym.Name() == "malloc" || librarysym.Name() == "free" ||
               librarysym.Name() == "posix_memalign") {
             continue
