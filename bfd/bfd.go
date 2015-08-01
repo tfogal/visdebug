@@ -465,7 +465,7 @@ func SymbolsProcess(inferior *ptrace.Tracee) ([]Symbol, error) {
       if strings.Contains(lib.name, need) {
         // Add every symbol, but only if it won't create duplicates.
         for _, librarysym := range libsym {
-          // malloc and free are important.  Don't accept any imitations.
+          // malloc and free are capital-I Important.  Accept no imitations.
           if !strings.Contains(lib.name, "libc.so") &&
              (librarysym.Name() == "malloc" || librarysym.Name() == "free" ||
               librarysym.Name() == "posix_memalign") {

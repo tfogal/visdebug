@@ -238,7 +238,7 @@ func TypeGlobalVar(program string, address uintptr) (Type, error) {
   // So, we take the approach of: search for the address the user gives us.  If
   // we don't find anything, drop the address down and search again.  Continue
   // doing this until we find *something*, then check if the something we found
-  // extends beyond the access address we're looking for.
+  // extends beyond the access address we started with.
   for addr := address; ent == nil && addr > 0x400000; addr -= 0x1 {
     ent, err = searchmemo(program, dwfGlobalVar{addr: addr})
     if err == io.EOF {
