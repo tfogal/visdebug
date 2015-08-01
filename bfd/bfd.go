@@ -381,7 +381,7 @@ func libraries(inferior *ptrace.Tracee,
 
 // allows us to sort (and thus search) our imported symbol lists.
 type elfimport []elf.ImportedSymbol
-func (s elfimport ) Len() int { return len(s); }
+func (s elfimport) Len() int { return len(s); }
 func (s elfimport) Less(i int, j int) bool { return s[i].Name < s[j].Name }
 func (s elfimport) Swap(i int, j int) { s[i], s[j] = s[j], s[i] }
 

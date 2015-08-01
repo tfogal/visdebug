@@ -868,7 +868,7 @@ func free_space_address(pid int) (uintptr, error) {
     var inode uint
     _, err = fmt.Sscanf(line, "%x-%x %s %s %s %d", &addr, &junkaddr, &junk,
                         &junk, &device, &inode)
-    // err could be EOF.  That means there's no free space.  Grumble.
+    // err could be EOF.  That'd mean there's no free space.  Grumble.
     // But it seems libc has some free space, so we probably don't need to
     // worry about that in practice.
     if err != nil { return 0x0, err }
