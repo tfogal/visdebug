@@ -16,6 +16,7 @@ type Channel interface {
   Error(format string, a ... interface{})
   Warn(format string, a ... interface{})
   Trace(format string, a ... interface{})
+	Printf(format string, a ... interface{})
 }
 
 type stdoutchn struct {
@@ -34,6 +35,7 @@ const (
   cwhgray = "\033[02;40m";
 )
 
+// Error prints out an error message to stderr, if error messages are enabled.
 func (c stdoutchn) Error(format string, a ... interface{}) {
   if (c.on & bit_ERROR) != 0 {
     fmt.Fprintf(os.Stderr, "%s", cred)
@@ -45,6 +47,7 @@ func (c stdoutchn) Error(format string, a ... interface{}) {
   }
 }
 
+// Warn prints a warning message to stderr, if warnings are enabled.
 func (c stdoutchn) Warn(format string, a ... interface{}) {
   if (c.on & bit_WARNING) > 0 {
     fmt.Fprintf(os.Stderr, "%s", cyellow)
@@ -55,6 +58,8 @@ func (c stdoutchn) Warn(format string, a ... interface{}) {
     fmt.Fprintf(os.Stderr, "%s", cnorm)
   }
 }
+
+// Trace prints a message to stdout, if tracing is enabled.
 func (c stdoutchn) Trace(format string, a ... interface{}) {
   if (c.on & bit_TRACE) > 0 {
     fmt.Printf("%s", cwhgray)
@@ -64,6 +69,16 @@ func (c stdoutchn) Trace(format string, a ... interface{}) {
     }
     fmt.Printf("%s", cnorm)
   }
+}
+
+// Printf unconditionally prints a message to stdout.
+func (c stdoutchn) Printf(format string, a ... interface{}) {
+	fmt.Printf("%s", cwhgray)
+	fmt.Printf(format, a...)
+	if format[len(format)-1] != '\n' {
+		fmt.Printf("\n")
+	}
+	fmt.Printf("%s", cnorm)
 }
 
 func (c *stdoutchn) TestEnable(name string) {
