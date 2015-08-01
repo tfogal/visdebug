@@ -1,7 +1,6 @@
 package main
 
 import(
-  "fmt"
   "io"
   "./msg"
 )
@@ -46,5 +45,5 @@ func supervise(argv []string, ie InferiorEvent) {
       return
     }
   }
-  fmt.Printf("[s] %s exited normally.\n", argv[0])
+	evc.Printf("%s exited normally.\n", argv[0])
 }
