@@ -119,10 +119,10 @@ func TestMallocInterrupt(t *testing.T) {
   if err != nil { t.Fatalf("%v", err) }
 
   // now insert our breakpoint and tell it to move on.
-  assert(present("malloc", symbols))
-  symmalloc := symbol("malloc", symbols)
+  assert(present("calloc", symbols))
+  symcalloc := symbol("calloc", symbols)
 
-  bp, err := debug.Break(inferior, symmalloc.Address())
+  bp, err := debug.Break(inferior, symcalloc.Address())
   if err != nil { t.Fatalf("insert breakpoint: %v\n", err) }
 
   // let the child run until 'malloc'.
