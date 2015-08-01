@@ -363,7 +363,7 @@ func libraries(inferior *ptrace.Tracee,
     if err != nil {
       return nil, fmt.Errorf("could not load link map 0x%x: %v", lmap_addr, err)
     }
-    b.Trace("Library loaded at 0x%012x, next at 0x%x [%s]", lmap.l_addr,
+    b.Trace("Library loaded at 0x%012x, next at 0x%012x [%s]", lmap.l_addr,
             lmap.l_next, lmap.libname)
     lmap_addr = uintptr(C.uintptr(unsafe.Pointer(lmap.l_next))) // next round.
     if lmap.libname == "" {
@@ -421,9 +421,6 @@ func SymbolsProcess(inferior *ptrace.Tracee) ([]Symbol, error) {
   }
 
   b.Trace("reading _DYNAMIC section from 0x%x\n", symbols[dyidx].addr)
-  lmap_addr := lmap_head(inferior, symbols[dyidx].addr)
-  b.Trace("head is at: 0x%x\n", lmap_addr)
-
   libs, err := libraries(inferior, symbols[dyidx].addr)
   if err != nil {
     return nil, err
@@ -434,6 +431,7 @@ func SymbolsProcess(inferior *ptrace.Tracee) ([]Symbol, error) {
 
     fp, err := os.Open(lib.name)
     if err != nil { // maybe happens with debug libraries that arent installed?
+			b.Warn("Skipping library %s; can't open: %v", lib.name, err)
       continue
     }
     defer fp.Close()
