@@ -31,11 +31,12 @@ const (
   cred = "\033[01;31m";
   cyellow = "\033[01;33m";
   clblue = "\033[01;36m";
+  cwhgray = "\033[02;40m";
 )
 
 func (c stdoutchn) Error(format string, a ... interface{}) {
   if (c.on & bit_ERROR) != 0 {
-    fmt.Fprintf(os.Stderr, "%s[s] ", cred)
+    fmt.Fprintf(os.Stderr, "%s", cred)
     fmt.Fprintf(os.Stderr, format, a...)
     if format[len(format)-1] != '\n' {
       fmt.Printf("\n")
@@ -46,7 +47,7 @@ func (c stdoutchn) Error(format string, a ... interface{}) {
 
 func (c stdoutchn) Warn(format string, a ... interface{}) {
   if (c.on & bit_WARNING) > 0 {
-    fmt.Fprintf(os.Stderr, "%s[s] ", cyellow)
+    fmt.Fprintf(os.Stderr, "%s", cyellow)
     fmt.Fprintf(os.Stderr, format, a...)
     if format[len(format)-1] != '\n' {
       fmt.Printf("\n")
@@ -56,11 +57,12 @@ func (c stdoutchn) Warn(format string, a ... interface{}) {
 }
 func (c stdoutchn) Trace(format string, a ... interface{}) {
   if (c.on & bit_TRACE) > 0 {
-    fmt.Printf("[s] ")
+    fmt.Printf("%s", cwhgray)
     fmt.Printf(format, a...)
     if format[len(format)-1] != '\n' {
       fmt.Printf("\n")
     }
+    fmt.Printf("%s", cnorm)
   }
 }
 
