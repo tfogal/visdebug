@@ -1,12 +1,1 @@
-Licensing is complicated.
-
-As the copyright holder, I can distribute this under any terms I want.
-I distribute this code under the LGPLv3 license.
-
-However, the combined work uses libbfd, which is under the GPL.  Thus
-*you* can only redistribute code from this project under the GPL.
-
-In practice, what this means is that you can strip out the ./bfd
-subdirectory and then distribute/use modified versions under the terms
-of the LGPL.  If you do not want or do not care to strip out ./bfd, you
-must utilize the GPL.
+This code is licenced under the LGPLv3.
