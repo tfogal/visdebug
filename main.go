@@ -371,13 +371,20 @@ func (asm x86_64) RetAddr(inferior *ptrace.Tracee) uintptr {
   if err != nil {
     log.Fatalf("grabbing insn ptr: %v\n", err)
   }
-  insn := make([]byte, 1)
+  insn := make([]byte, 4)
   if err := inferior.Read(iptr, insn) ; err != nil {
     log.Fatalf("could not read current (0x%x) instruction: %v\n", iptr, err)
   }
-  // 0x55 is the machine code for 'push %rbp'.
-  // 0xc3 is the machine code for 'ret'.
-  if 0x55 == insn[0] || 0xc3 == insn[0] {
+	// Sometimes, there is a "rex" prefix on the instruction.  In that case, we
+	// need to move forward a byte, since the prefix doesn't really say anything
+	// about what the instruction itself is.
+	const rex = 0x41
+	if rex == insn[0] {
+		insn[0] = insn[1]
+	}
+	const pushrbp = 0x55 // mnemonics for machine code
+	const ret = 0xc3
+  if pushrbp == insn[0] || ret == insn[0] {
     return asm.RetAddrTop(inferior)
   }
   return asm.RetAddrMid(inferior)
