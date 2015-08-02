@@ -16,8 +16,6 @@ import "unsafe"
 import "github.com/tfogal/ptrace"
 import "../msg"
 
-// easy way to enable/disable debugging prints.
-//var strm = os.Stdout
 var b = msg.StdChan("syms")
 
 /* BFD uses these values for defines it reads from. */
@@ -25,15 +23,6 @@ const(
   FALSE = 0
   TRUE = 1
 );
-
-// enum bfd_format:
-const (
-  bfd_unknown = 0   /* File format is unknown.  */
-  bfd_object = 1    /* Linker/assembler/compiler output.  */
-  bfd_archive=2     /* Object archive file.  */
-  bfd_core=3    /* Core dump.  */
-  bfd_type_end=4    /* Marks the end; don't use it!  */
-)
 
 // flags for a BFD file
 const(
@@ -145,7 +134,9 @@ func Symbols(executable string) ([]Symbol, error) {
   defer binary.Close()
 
   syms, err := binary.Symbols()
-  if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 
   symbols := make([]Symbol, 0)
   for i,_ := range syms {
@@ -437,9 +428,10 @@ func SymbolsProcess(inferior *ptrace.Tracee) ([]Symbol, error) {
     defer fp.Close()
 
     libsym, err := read_symbols_file(fp)
-    if err != nil {
-      panic(err)
-    }
+		if err != nil {
+			b.Error("Could not read symbols from %s: %v", lib.Name, err)
+			continue
+		}
 
     // get rid of any imported symbols.  don't want to see these.
     {
