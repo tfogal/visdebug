@@ -5,11 +5,11 @@ import "testing"
 
 func TestAll(t *testing.T) {
   os.Setenv("DEBUG", "+all")
-  chn := StdChan()
+  chn := StdChan("thename")
   chn.Trace("testing")
 }
 
 func TestError(t *testing.T) {
-  chn := StdChan()
+  chn := StdChan("thename")
   chn.Error("testing")
 }
