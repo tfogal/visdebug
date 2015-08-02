@@ -77,7 +77,6 @@ __attribute__((noinline)) static void smooth3(float* v) {
 }
 
 int main(int argc, char* argv[]) {
-  printf("errno: %d\n", errno);
   if(argc < 2) {
     fprintf(stderr, "need arg: which computation to run.\n");
     return EXIT_FAILURE;

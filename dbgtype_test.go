@@ -25,7 +25,6 @@ func TestDimsType(t *testing.T) {
   if dims.Name != "long unsigned int" { // aka size_t
     t.Fatalf("base type not 'long unsigned int': %v\n", dims.Name)
   }
-  fmt.Printf("dims: %v\n", dims)
 }
 
 func TestSymExec(t *testing.T) {
@@ -103,7 +102,7 @@ func testsymex(inferior *ptrace.Tracee, bb *cfg.Node) error {
     if rf == nil {
       return errors.New("no CMP setting?")
     }
-    fmt.Printf("%v\n", rf)
+    tst.Trace("%v\n", rf)
   }
   return nil
 }

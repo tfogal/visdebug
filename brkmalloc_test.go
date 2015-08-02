@@ -1,12 +1,14 @@
 package main
 
 import "errors"
-import "fmt"
 import "log"
 import "testing"
 import "./bfd"
 import "./debug"
+import "./msg"
 import "github.com/tfogal/ptrace"
+
+var tst = msg.StdChan("testing")
 
 func addr_main(program string) uintptr {
   symbols, err := bfd.Symbols(program)
@@ -47,5 +49,5 @@ func TestBreakMalloc(t *testing.T) {
   for _, sym := range symbols {
     if sym.Name() == "malloc" { malloc = sym }
   }
-  fmt.Printf("malloc is at 0x%x\n", malloc.Address())
+  tst.Printf("malloc is at 0x%x\n", malloc.Address())
 }

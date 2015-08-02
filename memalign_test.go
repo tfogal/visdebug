@@ -1,5 +1,4 @@
 package main
-import "fmt"
 import "syscall"
 import "testing"
 import "./bfd"
@@ -66,12 +65,12 @@ func TestExecFill(t *testing.T) {
     t.Fatalf("error inserting our malloc: %v", err)
   }
 
-  malloc := symbol("malloc", symbols)
-  if malloc == nil || malloc.Address() == 0x0 {
-    t.Fatalf("malloc symbol not available, symbtab broken?")
+  calloc := symbol("calloc", symbols)
+  if calloc == nil || calloc.Address() == 0x0 {
+    t.Fatalf("calloc symbol not available, symbtab broken?")
   }
-  if err := debug.WaitUntil(inferior, malloc.Address()) ; err != nil {
-    t.Fatalf("never hit a malloc? %v", err)
+  if err := debug.WaitUntil(inferior, calloc.Address()) ; err != nil {
+    t.Fatalf("never hit a calloc? %v", err)
   }
 
   var stack x86_64
@@ -79,8 +78,8 @@ func TestExecFill(t *testing.T) {
   retsite := stack.RetAddr(inferior)
   nbytes := stack.Arg1(inferior)
 
-  fmt.Printf("mallocing %v bytes but jumping to 0x%0x instead. Ret to: 0x%0x\n",
-             nbytes, addr, retsite)
+  tst.Trace("mallocing %v bytes but jumping to 0x%0x instead. Ret to: 0x%0x\n",
+            nbytes, addr, retsite)
   // now, instead, "jump" to our 'new' function.
   if err := inferior.SetIPtr(addr) ; err != nil {
     t.Fatalf("jumping to our in-mem function: %v", err)
@@ -113,7 +112,7 @@ func TestAllowDeny(t *testing.T) {
   if err != nil {
     t.Fatalf("could not get current insn ptr: %v\n", err)
   }
-  fmt.Printf("retsite will be: 0x%0x\n", iptr)
+  tst.Trace("retsite will be: 0x%0x\n", iptr)
   alc := allocation{base: 0x401000, length: 4096}
   err = allow(inferior, alc.base, alc.length, iptr)
   if err != nil {
