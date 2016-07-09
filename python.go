@@ -237,7 +237,7 @@ func (p *Python) free(inferior *ptrace.Tracee, bp debug.Breakpoint) error {
 	}
 	alc, err := p.pages(freearg) // figure out pages from address
 	pyc.Trace("free(0x%x) [ours: %v]", freearg, err == nil)
-	return nil
+
 	if err != nil {
 		// Not necessarily an error.  Could be memory we decided not to instrument.
 		pyc.Trace("allocation 0x%x not found; not instrumented?", freearg)
