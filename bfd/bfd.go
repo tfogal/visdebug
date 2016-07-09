@@ -320,7 +320,7 @@ type Library struct {
 // identifies the list of libraries currently loaded into the given process.
 // ADDR_DYNAMIC should be the address of the ELF header's "_DYNAMIC" section.
 func Libraries(inferior *ptrace.Tracee,
-               addr_dynamic uintptr) ([]Library, error) {
+	addr_dynamic uintptr) ([]Library, error) {
 	b.Trace("reading _DYNAMIC section from 0x%x\n", addr_dynamic)
 	lmap_addr := lmap_head(inferior, addr_dynamic)
 	b.Trace("head is at: 0x%x\n", lmap_addr)
