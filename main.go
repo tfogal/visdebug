@@ -767,7 +767,6 @@ func find_opcode(opcode x86asm.Op, inferior *ptrace.Tracee,
 			addr = follow_jump(inferior, ixn, addr)
 		}
 	}
-	return 0x0, errors.New("instruction never found")
 }
 
 // disgusting function to copy from a byte-slice-of-floats to an
@@ -1216,7 +1215,7 @@ func alloc_inferior(inferior *ptrace.Tracee, mmap uintptr,
 		return 0x0, err
 	}
 	if err := inferior.WriteWord(uintptr(regs.Rsp), uint64(main)); err != nil {
-		return 0x0, fmt.Errorf("could not replace *%rsp with main's addr: %v", err)
+		return 0x0, fmt.Errorf("could not replace *%%rsp with main's addr: %v", err)
 	}
 
 	// Okay, now setup our registers for the mmap arguments and jump there.
@@ -1247,7 +1246,7 @@ func alloc_inferior(inferior *ptrace.Tracee, mmap uintptr,
 		return 0x0, err
 	}
 	if err := inferior.WriteWord(uintptr(orig_regs.Rsp), stackptr); err != nil {
-		return 0x0, fmt.Errorf("could not reset *%rsp with correct addr: %v", err)
+		return 0x0, fmt.Errorf("could not reset *%%rsp with correct addr: %v", err)
 	}
 	return retval, nil
 }

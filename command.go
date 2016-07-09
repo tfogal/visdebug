@@ -710,7 +710,6 @@ func find_2arg(opcodes []x86asm.Op, inferior *ptrace.Tracee,
 			addr += uintptr(ixn.Args[0].(x86asm.Rel))
 		}
 	}
-	return x86asm.Inst{}, 0x0, errors.New("instruction not found")
 }
 
 // reads the inferior's memory according to the given memory reference.  the
@@ -1054,7 +1053,6 @@ func maxvalue(args [2]value) int64 {
 		}
 		return v2
 	}
-	panic("all cases should have been covered!")
 }
 
 // given a (CMP) instruction and its corresponding register_file setting from
