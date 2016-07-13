@@ -45,7 +45,18 @@ func TestAllocInferior(t *testing.T) {
 	if err := inferior.Continue(); err != nil {
 		t.Fatalf("could not finish program: %v", err)
 	}
-	<-inferior.Events() // let it finish.
+	stat := <-inferior.Events() // let it finish.
+	status := stat.(syscall.WaitStatus)
+	if status.Exited() {
+		return
+	}
+	if status.StopSignal() == syscall.SIGSEGV {
+		iptr, err := inferior.GetIPtr()
+		if err != nil {
+			t.Fatalf("program segfaulted, and inferior is invalid.")
+		}
+		t.Fatalf("program segfaulted at 0x%x after resume.", iptr)
+	}
 }
 
 func TestExecFill(t *testing.T) {
