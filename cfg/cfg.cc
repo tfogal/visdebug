@@ -1,3 +1,5 @@
+/* Distributed under the MIT license.  See the LICENSE file.
+ * Copyright (c) 2014--2016 Thomas Fogal */
 // Various routines for building the CFG using DynInst.
 // Note that we use C allocation routines all over the place, here, because
 // we want to pass the memory we create to other languages and it's way easier

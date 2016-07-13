@@ -1,3 +1,5 @@
+/* Distributed under the MIT license.  See the LICENSE file.
+ * Copyright (c) 2014--2016 Thomas Fogal */
 /* Simple program to allocate and then access memory.  Used to stress our
  * access vs. allocate overheads */
 #include <stdio.h>

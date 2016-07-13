@@ -1,3 +1,5 @@
+/* Distributed under the MIT license.  See the LICENSE file.
+ * Copyright (c) 2014--2016 Thomas Fogal */
 // "dbg" is a collection of stuff which is not really needed.  these functions
 // are often thrown into a code path as an ad hoc way of verifying that things
 // work the way we expect.

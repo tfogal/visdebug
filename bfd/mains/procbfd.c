@@ -1,3 +1,5 @@
+/* Distributed under the MIT license.  See the LICENSE file.
+ * Copyright (c) 2014--2016 Thomas Fogal */
 /* small test program to use BFD on memory from a process. */
 #define _POSIX_C_SOURCE 201212L
 #define _LARGEFILE64_SOURCE 1

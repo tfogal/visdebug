@@ -1,3 +1,5 @@
+/* Distributed under the MIT license.  See the LICENSE file.
+ * Copyright (c) 2014--2016 Thomas Fogal */
 /* read symbols from running process. */
 /* 1. find _DYNAMIC in normal symtable
  * 2. _Sym's st_value for _DYNAMIC gives d_tag of an Elf64_Dyn in inferior

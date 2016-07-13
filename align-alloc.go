@@ -1,3 +1,5 @@
+/* Distributed under the MIT license.  See the LICENSE file.
+ * Copyright (c) 2014--2016 Thomas Fogal */
 /* This defines an InferiorEvent implementation that changes all allocations to
  * be aligned to page boundaries.  This can help expose bugs (invalid memory
  * handling) in the application. */

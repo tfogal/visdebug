@@ -1,3 +1,5 @@
+/* Distributed under the MIT license.  See the LICENSE file.
+ * Copyright (c) 2014--2016 Thomas Fogal */
 #include <assert.h>
 #include <errno.h>
 #include <inttypes.h>

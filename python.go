@@ -1,3 +1,5 @@
+/* Distributed under the MIT license.  See the LICENSE file.
+ * Copyright (c) 2014--2016 Thomas Fogal */
 /* This defines an InferiorEvent implementation that just forwards the arrays
  * it gets to python and runs a user-provided script. */
 package main

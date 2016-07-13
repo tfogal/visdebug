@@ -1,3 +1,5 @@
+/* Distributed under the MIT license.  See the LICENSE file.
+ * Copyright (c) 2014--2016 Thomas Fogal */
 package cfg
 
 /* 'smooth2' is a (sub)graph copied from a real program which performs a 2d

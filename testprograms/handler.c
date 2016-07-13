@@ -1,3 +1,5 @@
+/* Distributed under the MIT license.  See the LICENSE file.
+ * Copyright (c) 2014--2016 Thomas Fogal */
 /* This program was modified from the one in the 'mprotect' manual page.
  * It basically just allocates a chunk of memory and then runs through it.  It
  * should really have no side effects when run normally.  But, if we're running

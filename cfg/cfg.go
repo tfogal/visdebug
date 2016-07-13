@@ -1,3 +1,5 @@
+/* Distributed under the MIT license.  See the LICENSE file.
+ * Copyright (c) 2014--2016 Thomas Fogal */
 // This is not 'config', but rather 'c'ontrol 'f'low 'g'raph.
 package cfg
 

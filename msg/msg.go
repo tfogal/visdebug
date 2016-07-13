@@ -1,3 +1,5 @@
+/* Distributed under the MIT license.  See the LICENSE file.
+ * Copyright (c) 2014--2016 Thomas Fogal */
 // A simple package to give channel-based logging to std(err|out).
 // A "channel" in this case isn't a go channel, but rather a named conduit for
 // logging.  Channels can be enabled or disabled individually.  It is expected

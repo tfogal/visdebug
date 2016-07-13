@@ -1,3 +1,5 @@
+/* Distributed under the MIT license.  See the LICENSE file.
+ * Copyright (c) 2014--2016 Thomas Fogal */
 #define _POSIX_C_SOURCE 200809L
 #include <inttypes.h>
 #include <stdarg.h>
