@@ -514,6 +514,7 @@ func setup_tjfmalloc(inferior *ptrace.Tracee) (uintptr, error) {
 		return 0x0, err
 	}
 
+/*
 	malign := symbol("posix_memalign", globals.symbols)
 	if malign == nil {
 		return 0x0, errors.New("'posix_memalign' not in symbol list!")
@@ -526,6 +527,8 @@ func setup_tjfmalloc(inferior *ptrace.Tracee) (uintptr, error) {
 	if err != nil {
 		return 0x0, err
 	}
+*/
+	wtf(inferior, addr)
 	return addr, nil
 }
 
@@ -810,8 +813,10 @@ func instrument(argv []string) (*ptrace.Tracee, error) {
 		return nil, fmt.Errorf("tjfmalloc failure: %v\n", err)
 	}
 	inject.Trace("tjfmalloc initialized at 0x%x", tjfmalloc)
+/*
 	tmalloc := bfd.MakeSymbol("__tjfmalloc", tjfmalloc, 0)
 	globals.symbols = append(globals.symbols, tmalloc)
+*/
 
 	return inferior, nil
 }
@@ -978,8 +983,8 @@ func show_free_space(argv []string) {
 	assert(symbol("posix_memalign", globals.symbols) != nil)
 
 	fspace_fill(inferior, symbol("getpagesize", globals.symbols).Address(),
-		symbol("posix_memalign", globals.symbols).Address(),
-		symbol("mprotect", globals.symbols).Address())
+	            symbol("posix_memalign", globals.symbols).Address(),
+	            symbol("mprotect", globals.symbols).Address())
 }
 
 // slice[i] = word[i] forall i in word
@@ -995,6 +1000,94 @@ func replace(slice []uint8, word int32) {
 	slice[1] = bts[1]
 	slice[2] = bts[2]
 	slice[3] = bts[3]
+}
+
+// Fixes up the sequence of calls in the given machine code (FQN) that is
+// planned to be injected at ADDRess.
+// CALLS is a sequence of offset:fqnptr fqnptr replacements to perform.
+// In x86-64, function calls are %RIP-relative, and so this takes into account
+// what %RIP will be at the call site and adjusts the call address
+// appropriately.
+// The machine code to inject (given in FQN) should use 5-byte call
+// instructions (0xe8 followed by a 4-byte relative address).
+func callfix(addr uintptr, fqn []byte, calls map[uint]uintptr) {
+	// First update the FQN with the appropriate call encodings/instructions.
+	for offset, ptr := range calls {
+		e8addr := int64(addr) + int64(offset)
+		call_end := e8addr + 5
+		if 0xe8 != fqn[offset] {
+			inject.Error("offset %d, meant to be a call to 0x%x, corresponds with 0x%x, not 0xe8!",
+			             offset, ptr, fqn[e8addr])
+			panic("invalid offset")
+		}
+		reladdr := int64(ptr) - int64(call_end)
+		if reladdr != int64(int32(reladdr)) {
+			inject.Error("Injecting a function at 0x%x that wants to call 0x%x.  Relative addresses too large, can't encode in 32-bit call.",
+			             addr, ptr)
+			panic("invalid fqn address")
+		}
+		replace(fqn[offset+1:offset+1+4], int32(reladdr))
+	}
+}
+
+func wtf(inferior *ptrace.Tracee, addr uintptr) {
+	// not actually required, but probably indicates another error if false.
+	if addr % 4096 != 0 {
+		inject.Error("Injection address is not page-aligned.")
+		return
+	}
+	// we're essentially defining the function:
+	//   void* fqn(size_t n) {
+	//     void* mem = NULL;
+	//     posix_memalign(&mem, 4096, n);
+	//     if(mem == NULL) {
+	//       return NULL;
+	//     }
+	//     mprotect(mem, n, PROT_READ);
+	//     return mem;
+	//   }
+	// but in pure object code.  Note that the above relies on posix_memalign not
+	// changing 'mem' when it fails, which isn't necessarily guaranteed...
+	memalign_code := []byte{
+		0x55,             // push   %rbp
+		0x48, 0x89, 0xe5, // mov    %rsp,%rbp
+		0x48, 0x83, 0xec, 0x20, // sub    $0x20,%rsp
+		0x48, 0x89, 0x7d, 0xe8, // mov    %rdi,-0x18(%rbp)
+		0x48, 0xc7, 0x45, 0xf8, // movq   ...
+		0x00, 0x00, 0x00, 0x00, // ...    $0x0,-0x8(%rbp)
+		0x48, 0x8b, 0x55, 0xe8, // mov    -0x18(%rbp),%rdx
+		0x48, 0x8d, 0x45, 0xf8, // lea    -0x8(%rbp),%rax
+		0xbe, 0x00, 0x10, 0x00, 0x00, // mov    $0x1000,%esi
+		0x48, 0x89, 0xc7, // mov    %rax,%rdi
+		0xe8, 0xFF, 0xFF, 0xFF, 0xFF, // callq  POSIX_MEMALIGN
+		// The FF's are a reloffset; we cannot know them statically. See below.
+		0x48, 0x8b, 0x45, 0xf8, // mov    -0x8(%rbp),%rax
+		0x48, 0x85, 0xc0, // test   %rax,%rax
+		0x75, 0x07, // jne    4005c6 <aalloc+0x39>
+		0xb8, 0x00, 0x00, 0x00, 0x00, // mov    $0x0,%eax
+		0xeb, 0x1c, // jmp    4005e2 <aalloc+0x55>
+		0x48, 0x8b, 0x45, 0xf8, // mov    -0x8(%rbp),%rax
+		0x48, 0x8b, 0x4d, 0xe8, // mov    -0x18(%rbp),%rcx
+		0xba, 0x01, 0x00, 0x00, 0x00, // mov    $0x1,%edx
+		0x48, 0x89, 0xce, // mov    %rcx,%rsi
+		0x48, 0x89, 0xc7, // mov    %rax,%rdi
+		0xe8, 0xFF, 0xFF, 0xFF, 0xFF, // callq MPROTECT
+		0x48, 0x8b, 0x45, 0xf8, // mov    -0x8(%rbp),%rax
+		0xc9, // leaveq
+		0xc3, // retq
+	}
+	replacements := make(map[uint]uintptr)
+	replacements[36] = symbol("posix_memalign", globals.symbols).Address()
+	replacements[76] = symbol("mprotect", globals.symbols).Address()
+
+	callfix(addr, memalign_code, replacements)
+
+	if err := inferior.Write(addr, memalign_code); err != nil {
+		inject.Error("Could not inject tjfmalloc code: %v.", err)
+		return/* err*/
+	}
+	tmalloc := bfd.MakeSymbol("__tjfmalloc", addr, 0)
+	globals.symbols = append(globals.symbols, tmalloc)
 }
 
 // Identifies a part of our address space that is unused.  Then fills it with a
